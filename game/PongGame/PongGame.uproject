@@ -1,0 +1,9 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "",
+	"Category": "Sample",
+	"Description": "Code-driven Pong — native aarch64 test game for the DGX Spark.",
+	"Modules": [
+		{ "Name": "PongGame", "Type": "Runtime", "LoadingPhase": "Default" }
+	]
+}
