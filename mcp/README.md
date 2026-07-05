@@ -79,13 +79,22 @@ Then in Claude Code: `/mcp` should list **unreal** with its tools.
   the actor's `SetActorLocation`.
 - "List everything in the level" → `unreal_list_actors()`.
 
-## Known limits / notes
+## Blueprint-graph authoring (bp_* tools)
 
-- **Blueprint node graphs** can't be authored over Remote Control — it calls exposed UFunctions and
-  sets properties, and can *create* Blueprint assets and set their defaults, but not wire event
-  graphs. Games built from spawned/configured actors + C++ gameplay classes + property tweaks work
-  fully. For graph authoring you'd add a custom C++ editor plugin (e.g. chongdashu/unreal-mcp) built
-  for arm64 — a normal engine-source build.
+The **DGXMCPTools** C++ editor plugin (`../plugin/`, built for arm64) adds full Blueprint-**graph**
+authoring on top of Remote Control — `bp_create`, `bp_add_component`, `bp_add_variable`,
+`bp_add_event_node`, `bp_add_call_node`, `bp_add_variable_node`, `bp_connect`, `bp_compile`,
+`bp_save`, `bp_spawn`, `bp_describe_graph`, etc. Build + enable the plugin (see `../plugin/README.md`)
+and these tools appear alongside the Remote Control ones. Example — a BeginPlay→PrintString graph:
+
+```
+bp = bp_create("/Game/Blueprints", "BP_Hello", "/Script/Engine.Actor")["ReturnValue"]
+a  = bp_add_event_node(bp, "ReceiveBeginPlay")["ReturnValue"]
+b  = bp_add_call_node(bp, "PrintString", "/Script/Engine.KismetSystemLibrary", x=400)["ReturnValue"]
+bp_connect(bp, a, "then", b, "execute"); bp_compile(bp); bp_save("/Game/Blueprints/BP_Hello")
+```
+
+## Known limits / notes
 - Object paths use the format `/Game/Path/Pkg.Obj:PersistentLevel.ActorName`; CDOs use
   `/Script/<Module>.Default__<Class>`. `functionName` is the **C++** name.
 - The editor stays up as long as its process lives; run it under tmux/systemd so it survives your SSH

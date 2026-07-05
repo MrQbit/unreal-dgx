@@ -1,0 +1,20 @@
+{
+	"FileVersion": 3,
+	"Version": 1,
+	"VersionName": "1.0",
+	"FriendlyName": "DGX MCP Tools",
+	"Description": "Editor plugin exposing Blueprint-authoring functions (create/edit/compile Blueprints, spawn actors) as BlueprintCallable UFUNCTIONs, callable over the Remote Control HTTP API for MCP-driven game building on aarch64.",
+	"Category": "Scripting",
+	"CreatedBy": "MrQbit + Claude",
+	"EnabledByDefault": true,
+	"CanContainContent": false,
+	"IsBetaVersion": true,
+	"Installed": false,
+	"Modules": [
+		{
+			"Name": "DGXMCPTools",
+			"Type": "Editor",
+			"LoadingPhase": "Default"
+		}
+	]
+}

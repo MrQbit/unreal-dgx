@@ -160,5 +160,123 @@ def unreal_raw(method: str, path: str, body: dict | None = None) -> dict:
     return _req(method.upper(), path, body)
 
 
+# ============================================================================
+# Blueprint AUTHORING — via the DGXMCPTools C++ editor plugin (built for arm64).
+# These go beyond stock Remote Control: they create/edit/compile Blueprint GRAPHS.
+# All call the plugin's function library CDO.
+# ============================================================================
+DGX_BP_TOOLS = "/Script/DGXMCPTools.Default__DGXBlueprintTools"
+
+
+def _bp(func: str, params: dict) -> dict:
+    """Call a DGXBlueprintTools function; return its ReturnValue (or the full result on error)."""
+    res = unreal_call_function(DGX_BP_TOOLS, func, params)
+    if res.get("error"):
+        return res
+    r = res.get("result", {})
+    return {"ReturnValue": r.get("ReturnValue")} if isinstance(r, dict) and "ReturnValue" in r else res
+
+
+@mcp.tool()
+def bp_create(package_path: str, name: str, parent_class: str = "/Script/Engine.Actor") -> dict:
+    """Create a new Blueprint asset. package_path e.g. "/Game/Blueprints", parent_class e.g.
+    "/Script/Engine.Actor" or "/Script/Engine.Pawn". Returns the new Blueprint's object path."""
+    return _bp("CreateBlueprint", {"PackagePath": package_path, "AssetName": name, "ParentClassPath": parent_class})
+
+
+@mcp.tool()
+def bp_add_component(blueprint_path: str, component_class: str, name: str) -> dict:
+    """Add a component to a Blueprint, e.g. component_class "/Script/Engine.StaticMeshComponent"."""
+    return _bp("AddComponent", {"BlueprintPath": blueprint_path, "ComponentClassPath": component_class, "ComponentName": name})
+
+
+@mcp.tool()
+def bp_set_component_property(blueprint_path: str, component_name: str, property_name: str, value: str) -> dict:
+    """Set a default property on a component. value is an import string (e.g. "(X=1,Y=2,Z=3)" for a vector)."""
+    return _bp("SetComponentProperty", {"BlueprintPath": blueprint_path, "ComponentName": component_name,
+                                        "PropertyName": property_name, "Value": value})
+
+
+@mcp.tool()
+def bp_add_variable(blueprint_path: str, name: str, var_type: str = "float") -> dict:
+    """Add a member variable. var_type: bool,int,int64,float,double,string,name,text,vector,rotator,transform,
+    or an object class path (e.g. "/Script/Engine.Actor")."""
+    return _bp("AddVariable", {"BlueprintPath": blueprint_path, "VarName": name, "VarType": var_type})
+
+
+@mcp.tool()
+def bp_set_variable_default(blueprint_path: str, name: str, value: str) -> dict:
+    """Set a member variable's default value (import string)."""
+    return _bp("SetVariableDefault", {"BlueprintPath": blueprint_path, "VarName": name, "Value": value})
+
+
+@mcp.tool()
+def bp_add_function(blueprint_path: str, function_name: str) -> dict:
+    """Add a new (empty) function graph to a Blueprint."""
+    return _bp("AddFunctionGraph", {"BlueprintPath": blueprint_path, "FunctionName": function_name})
+
+
+@mcp.tool()
+def bp_add_event_node(blueprint_path: str, event_name: str = "ReceiveBeginPlay", x: float = 0, y: float = 0) -> dict:
+    """Add an overridable event node to the event graph (e.g. "ReceiveBeginPlay", "ReceiveTick").
+    Returns the node GUID (use with bp_connect)."""
+    return _bp("AddEventNode", {"BlueprintPath": blueprint_path, "EventName": event_name, "NodePosX": x, "NodePosY": y})
+
+
+@mcp.tool()
+def bp_add_call_node(blueprint_path: str, function_name: str, target_class: str = "",
+                     graph: str = "", x: float = 300, y: float = 0) -> dict:
+    """Add a 'call function' node. target_class is the class owning the function
+    ("/Script/Engine.KismetSystemLibrary" for statics; "" = self). graph "" = event graph.
+    Returns the node GUID."""
+    return _bp("AddCallFunctionNode", {"BlueprintPath": blueprint_path, "GraphName": graph,
+                                       "TargetClassPath": target_class, "FunctionName": function_name,
+                                       "NodePosX": x, "NodePosY": y})
+
+
+@mcp.tool()
+def bp_add_variable_node(blueprint_path: str, var_name: str, setter: bool = False,
+                         graph: str = "", x: float = 0, y: float = 0) -> dict:
+    """Add a variable get (setter=False) or set (setter=True) node. Returns the node GUID."""
+    return _bp("AddVariableNode", {"BlueprintPath": blueprint_path, "GraphName": graph,
+                                   "VarName": var_name, "bIsSetter": setter, "NodePosX": x, "NodePosY": y})
+
+
+@mcp.tool()
+def bp_connect(blueprint_path: str, node_a_guid: str, pin_a: str,
+               node_b_guid: str, pin_b: str, graph: str = "") -> dict:
+    """Connect two node pins. Exec pins: out="then", in="execute". Data pins use the parameter name."""
+    return _bp("ConnectNodes", {"BlueprintPath": blueprint_path, "GraphName": graph,
+                                "NodeAGuid": node_a_guid, "PinAName": pin_a,
+                                "NodeBGuid": node_b_guid, "PinBName": pin_b})
+
+
+@mcp.tool()
+def bp_describe_graph(blueprint_path: str, graph: str = "") -> dict:
+    """List nodes (GUIDs, titles, pins) in a graph — inspect what's been built. graph "" = event graph."""
+    return _bp("DescribeGraph", {"BlueprintPath": blueprint_path, "GraphName": graph})
+
+
+@mcp.tool()
+def bp_compile(blueprint_path: str) -> dict:
+    """Compile a Blueprint. Returns ReturnValue=true if it compiled cleanly."""
+    return _bp("CompileBlueprint", {"BlueprintPath": blueprint_path})
+
+
+@mcp.tool()
+def bp_save(asset_path: str) -> dict:
+    """Save a Blueprint/asset to disk, e.g. asset_path "/Game/Blueprints/BP_Foo"."""
+    return _bp("SaveAsset", {"AssetPath": asset_path})
+
+
+@mcp.tool()
+def bp_spawn(class_path: str, location: dict | None = None, rotation: dict | None = None) -> dict:
+    """Spawn an actor from a Blueprint or native class into the editor level (via the plugin).
+    class_path e.g. "/Game/Blueprints/BP_Foo.BP_Foo_C" or "/Script/Engine.PointLight"."""
+    return _bp("SpawnActor", {"ClassPath": class_path,
+                              "Location": location or {"X": 0, "Y": 0, "Z": 0},
+                              "Rotation": rotation or {"Pitch": 0, "Yaw": 0, "Roll": 0}})
+
+
 if __name__ == "__main__":
     mcp.run()
