@@ -1020,10 +1020,10 @@ index 0b24600b4..7dec68c05 100644
  
  	const uint pixel_size = (tga.pixel_size/8);
 diff --git a/Engine/Source/UnrealEditor.Target.cs b/Engine/Source/UnrealEditor.Target.cs
-index 5f7cb7bc4..677e9b87e 100644
+index 5f7cb7bc4..e920356e4 100644
 --- a/Engine/Source/UnrealEditor.Target.cs
 +++ b/Engine/Source/UnrealEditor.Target.cs
-@@ -12,5 +12,31 @@ public class UnrealEditorTarget : TargetRules
+@@ -12,5 +12,35 @@ public class UnrealEditorTarget : TargetRules
  		BuildEnvironment = TargetBuildEnvironment.Shared;
  		bBuildAllModules = true;
  		ExtraModuleNames.Add("UnrealGame");
@@ -1035,12 +1035,17 @@ index 5f7cb7bc4..677e9b87e 100644
 +		// RuntimeInformation to detect the host arch directly).
 +		if (System.Environment.GetEnvironmentVariable("UE_ARM64_MINIMAL_EDITOR") == "1")
 +		{
-+			// Minimal build (avoids the large web of optional plugins with x86-only deps). It drops a few
-+			// ESSENTIAL non-plugin modules the editor asserts on (the running target-platform), so add them
-+			// back explicitly. Optional plugin modules that don't build are skipped by a PluginManager patch.
++			// Minimal build — the furthest known-working state: the editor LINKS and BOOTS (loads engine,
++			// mounts plugins, compiles Vulkan shaders, starts Asset Registry), then hits the documented
++			// `RunningPlatform` assert (no Linux target-platform registers). See docs/STATUS.md.
++			//
++			// NOTE: `bBuildAllModules = true` (the normal editor path that registers all target-platform
++			// modules) does NOT converge here because it drags in optional plugins with x86-only libs
++			// (OpenCV, EOS, Steam, OpenXR, WebRTC/PixelStreaming, WebM/VPx, Bink, NNE/ONNX, msquic, ...),
++			// and `DisablePlugins` is a SOFT disable that loses to hard plugin dependencies — so those
++			// plugins stay enabled and fail to link. Reaching a full build needs either stubbing those
++			// ~10 x86 libs, or fixing the target-platform module discovery under this minimal build.
 +			bBuildAllModules = false;
-+			ExtraModuleNames.Add("LinuxTargetPlatform");
-+			ExtraModuleNames.Add("LinuxArm64TargetPlatform");
 +
 +			// CEF3 (Chromium Embedded Framework) ships x86_64-only prebuilt binaries and cannot be
 +			// rebuilt for arm64 here; disabling it compiles the WebBrowser modules' non-CEF path.
@@ -1048,7 +1053,6 @@ index 5f7cb7bc4..677e9b87e 100644
 +			// (ISPC is disabled for aarch64 in UEBuildLinux.SetUpPlatformEnvironment — bCompileISPC has
 +			// RequiresUniqueBuildEnvironment so it can't be overridden here in a Shared-environment target.)
 +
-+			// Plugins whose third-party libraries are x86-only / proprietary and not yet ported.
 +			DisablePlugins.Add("PerforceSourceControl");    // x86 P4 API
 +			DisablePlugins.Add("ChangelistReview");         // x86 P4 API
 +			DisablePlugins.Add("KDevelopSourceCodeAccess"); // x86 P4 API

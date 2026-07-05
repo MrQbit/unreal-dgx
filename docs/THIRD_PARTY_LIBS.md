@@ -36,7 +36,8 @@ Common build flags for rebuilt libs: `clang-18`/`clang++-18`, `-fPIC`, and **`-s
 | **CEF3 (Chromium)** | X | x86‑only, cannot rebuild | `bCompileCEF3=false` → WebBrowser non‑CEF path. |
 | **USD (Pixar)** | X | needs USD/Python/Boost.Python builds not ported | `UnrealUSDWrapper.Build.cs` `EnableUsdSdk` returns false on arm64 → USD plugins compile with SDK unavailable. |
 | **Perforce P4 API** | X | x86‑only | Disabled Perforce/Changelist/KDevelop plugins. |
-| **OpenCV** | X (TODO) | x86‑only .so | To disable the OpenCV plugin (or use system OpenCV) — in progress. |
+| **OpenCV** | X (TODO) | x86‑only .so | Can't be `DisablePlugins`'d cleanly (hard-depended by CameraCalibration / MediaFrameworkUtilities / MixedRealityCaptureFramework / nDisplay). Needs a stub `.so` or system OpenCV — see `STATUS.md`. |
+| **EOS / Steam / OpenXR / WebRTC / libvpx / Bink / ONNX-IREE / msquic / protobuf** | X (TODO) | x86‑only, pulled in only by `bBuildAllModules=true` | Optional plugins; needed only for the full-module build. `DisablePlugins` is soft (loses to hard deps), so reaching a full build needs these libs stubbed. Not needed for the minimal booting editor. |
 
 ## Regenerating the rebuilt libraries
 

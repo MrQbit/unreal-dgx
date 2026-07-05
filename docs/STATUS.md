@@ -35,15 +35,30 @@ returns null: **no Linux target platform registers**. Findings:
 
 ### Two candidate real fixes (next session)
 
-1. **`bBuildAllModules=true` + disable the full x86-dep plugin closure.** The full build registers all
-   TP modules correctly (the normal editor path). Getting there means disabling every plugin whose
-   third-party lib is x86-only *and their dependents*:
-   OpenCV (+nDisplay, LedWallCalibration), OpenXR (+XRScribe, HPMotionController, XRCreativeFramework,
-   VirtualScouting, LiveLinkXR), the EOS family, Steam (+SteamSockets), WebMMedia (+WebMMoviePlayer),
-   VPxDecoderElectra, BinkMedia, SoundMod, MsQuic/QuicMessaging, NNERuntimeIREE/ORT, GeoReferencing,
-   MovieRenderPipeline, plus Protobuf and XMPP (needs `-lresolv`). A bounded (~40) but iterative closure.
-2. Trace why `ModuleExists("LinuxTargetPlatform")` is false at discovery time despite the .so +
-   manifest entry (subdir-manifest scan timing vs. `bHasCompiledTargetSupport` computed at DDPI parse).
+**Key finding this session:** `bBuildAllModules=true` (the normal editor path that registers all TP
+modules) does **not** converge via `DisablePlugins`, because **`DisablePlugins` is a *soft* disable —
+it loses to hard plugin dependencies.** Optional plugins with x86-only libs (OpenCV, EOS, Steam,
+OpenXR, WebRTC/PixelStreaming, WebM/VPx, Bink, NNE/ONNX, msquic, protobuf, …) are hard-depended-on by
+other enabled plugins (e.g. OpenCV←CameraCalibration/MediaFrameworkUtilities/MixedRealityCaptureFramework/
+nDisplay; Steam←SteamSockets/SteamController; WebRTC←PixelStreamingPlayer), so they stay enabled and
+fail to link. Disabling the transitive closure was attempted and did **not** converge (the closure
+keeps growing; some are hard-referenced by non-disableable modules).
+
+So the two real paths are:
+
+1. **Stub the ~10 x86-only third-party libs** (OpenCV, EOS SDK, steam_api, openxr_loader, WebRTC,
+   libvpx, Bink, ONNX/IREE, msquic, protobuf) the same way FBX/Bink-encode/ISPC were stubbed
+   (asm no-op exports generated from the linker's undefined-symbol list), so `bBuildAllModules=true`
+   *builds* everything and registers all TP modules. Also XMPP needs `-lresolv`, and a couple of
+   plugins use x86 MMX/SSE intrinsics (`__builtin_ia32_*`) that need NEON/scalar fallbacks or guarding.
+2. **Fix the target-platform discovery under the minimal build** — trace why
+   `ModuleExists("LinuxTargetPlatform")` is false at DDPI-parse time (`bHasCompiledTargetSupport`)
+   despite the module being built, placed in the main `Binaries/Linux/`, and hand-added to the main
+   `UnrealEditor.modules` (BuildIds match). At runtime only Android TP modules register. This is the
+   lower-effort path if the module-registration timing can be understood.
+
+The committed `UnrealEditor.Target.cs` is left in the minimal (`bBuildAllModules=false`) state — the
+furthest point where the editor links and boots.
 
 ## Remaining work
 
