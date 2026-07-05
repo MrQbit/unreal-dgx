@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "unreal": {
+      "command": "/home/mrqbit/Downloads/unreal-dgx/mcp/.venv/bin/python",
+      "args": ["/home/mrqbit/Downloads/unreal-dgx/mcp/unreal_rc_server.py"],
+      "env": { "UE_RC_URL": "http://127.0.0.1:30010" }
+    }
+  }
+}
