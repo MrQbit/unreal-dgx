@@ -282,6 +282,32 @@ index a1ee4b037..8381fcd09 100644
  		}
  		if (Target.Platform == UnrealTargetPlatform.Mac)
  		{
+diff --git a/Engine/Source/Developer/Linux/LinuxArm64TargetPlatform/LinuxArm64TargetPlatform.Build.cs b/Engine/Source/Developer/Linux/LinuxArm64TargetPlatform/LinuxArm64TargetPlatform.Build.cs
+index c53847f87..6f7d1a361 100644
+--- a/Engine/Source/Developer/Linux/LinuxArm64TargetPlatform/LinuxArm64TargetPlatform.Build.cs
++++ b/Engine/Source/Developer/Linux/LinuxArm64TargetPlatform/LinuxArm64TargetPlatform.Build.cs
+@@ -6,7 +6,7 @@ public class LinuxArm64TargetPlatform : ModuleRules
+ {
+     public LinuxArm64TargetPlatform(ReadOnlyTargetRules Target) : base(Target)
+     {
+-        BinariesSubFolder = "LinuxArm64";
++        BinariesSubFolder = (Target.Architecture == UnrealArch.Arm64) ? "" : "LinuxArm64";
+ 
+         PrivateDependencyModuleNames.AddRange(
+             new string[] {
+diff --git a/Engine/Source/Developer/Linux/LinuxTargetPlatform/LinuxTargetPlatform.Build.cs b/Engine/Source/Developer/Linux/LinuxTargetPlatform/LinuxTargetPlatform.Build.cs
+index f7630669a..fce46ca6c 100644
+--- a/Engine/Source/Developer/Linux/LinuxTargetPlatform/LinuxTargetPlatform.Build.cs
++++ b/Engine/Source/Developer/Linux/LinuxTargetPlatform/LinuxTargetPlatform.Build.cs
+@@ -6,7 +6,7 @@ public class LinuxTargetPlatform : ModuleRules
+ {
+     public LinuxTargetPlatform(ReadOnlyTargetRules Target) : base(Target)
+ 	{
+-        BinariesSubFolder = "Linux";
++        BinariesSubFolder = (Target.Architecture == UnrealArch.Arm64) ? "" : "Linux";
+ 
+ 		PrivateDependencyModuleNames.AddRange(
+             new string[] {
 diff --git a/Engine/Source/Developer/MeshUtilities/Private/MeshDistanceFieldUtilities.cpp b/Engine/Source/Developer/MeshUtilities/Private/MeshDistanceFieldUtilities.cpp
 index 4edf15fe9..50b40d209 100644
 --- a/Engine/Source/Developer/MeshUtilities/Private/MeshDistanceFieldUtilities.cpp
@@ -994,10 +1020,10 @@ index 0b24600b4..7dec68c05 100644
  
  	const uint pixel_size = (tga.pixel_size/8);
 diff --git a/Engine/Source/UnrealEditor.Target.cs b/Engine/Source/UnrealEditor.Target.cs
-index 5f7cb7bc4..96b9f584f 100644
+index 5f7cb7bc4..677e9b87e 100644
 --- a/Engine/Source/UnrealEditor.Target.cs
 +++ b/Engine/Source/UnrealEditor.Target.cs
-@@ -12,5 +12,30 @@ public class UnrealEditorTarget : TargetRules
+@@ -12,5 +12,31 @@ public class UnrealEditorTarget : TargetRules
  		BuildEnvironment = TargetBuildEnvironment.Shared;
  		bBuildAllModules = true;
  		ExtraModuleNames.Add("UnrealGame");
@@ -1009,11 +1035,12 @@ index 5f7cb7bc4..96b9f584f 100644
 +		// RuntimeInformation to detect the host arch directly).
 +		if (System.Environment.GetEnvironmentVariable("UE_ARM64_MINIMAL_EDITOR") == "1")
 +		{
-+			// Build all modules so ESSENTIAL engine modules (target-platform modules, etc.) are built with
-+			// correct manifests/paths — a minimal build silently drops them and the editor asserts at
-+			// runtime. USD is disabled on arm64 in UnrealUSDWrapper.Build.cs (EnableUsdSdk), so the USD
-+			// plugins compile with the SDK unavailable instead of throwing.
-+			bBuildAllModules = true;
++			// Minimal build (avoids the large web of optional plugins with x86-only deps). It drops a few
++			// ESSENTIAL non-plugin modules the editor asserts on (the running target-platform), so add them
++			// back explicitly. Optional plugin modules that don't build are skipped by a PluginManager patch.
++			bBuildAllModules = false;
++			ExtraModuleNames.Add("LinuxTargetPlatform");
++			ExtraModuleNames.Add("LinuxArm64TargetPlatform");
 +
 +			// CEF3 (Chromium Embedded Framework) ships x86_64-only prebuilt binaries and cannot be
 +			// rebuilt for arm64 here; disabling it compiles the WebBrowser modules' non-CEF path.
