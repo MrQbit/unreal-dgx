@@ -1,0 +1,1030 @@
+diff --git a/Engine/Build/BatchFiles/Linux/GitDependencies.sh b/Engine/Build/BatchFiles/Linux/GitDependencies.sh
+index 8f4617295..57ada39ad 100755
+--- a/Engine/Build/BatchFiles/Linux/GitDependencies.sh
++++ b/Engine/Build/BatchFiles/Linux/GitDependencies.sh
+@@ -16,14 +16,18 @@ BASE_PATH="`dirname "$SCRIPT_PATH"`"
+ cd ../../../..
+ RESULT=0
+ 
++# aarch64 hosts: use the natively-built arm64 GitDependencies (Epic ships linux-x64 only)
++ARCH_DIR=linux-x64
++[ "$(uname -m)" = "aarch64" ] && ARCH_DIR=linux-arm64
++
+ while : ; do
+-        ./Engine/Binaries/DotNET/GitDependencies/linux-x64/GitDependencies $ARGS
++        ./Engine/Binaries/DotNET/GitDependencies/$ARCH_DIR/GitDependencies $ARGS
+         RESULT=$?
+ 
+         echo "Result: $RESULT"
+         # quit if not crashed
+         [[ $RESULT -lt 129 ]] && break
+-        echo "./Engine/Binaries/DotNET/GitDependencies/linux-x64/GitDependencies $ARGS crashed with return code $RESULT" >> GitDependencies.crash.log
++        echo "./Engine/Binaries/DotNET/GitDependencies/$ARCH_DIR/GitDependencies $ARGS crashed with return code $RESULT" >> GitDependencies.crash.log
+ done
+ 
+ exit $RESULT
+diff --git a/Engine/Build/BatchFiles/Linux/SetupDotnet.sh b/Engine/Build/BatchFiles/Linux/SetupDotnet.sh
+index 813626fa6..ab6e91c22 100755
+--- a/Engine/Build/BatchFiles/Linux/SetupDotnet.sh
++++ b/Engine/Build/BatchFiles/Linux/SetupDotnet.sh
+@@ -5,9 +5,34 @@ START_DIR=`pwd`
+ cd "$1"
+ 
+ IS_DOTNET_INSTALLED=0
++
++# aarch64 hosts: Epic bundles only a linux-x64 dotnet, which cannot run natively here.
++# Force use of a system-installed arm64 .NET SDK and bypass the (x64-only) bundled one.
++# This block is authoritative on aarch64: it locates a system dotnet, marks it installed,
++# and skips the version-parsing block below (whose parser mishandles SDK strings like 8.0.422).
++if [ "$(uname -m)" = "aarch64" ]; then
++	export UE_USE_SYSTEM_DOTNET=1
++	if ! command -v dotnet >/dev/null 2>&1; then
++		for CANDIDATE in "$HOME/.dotnet" /usr/lib/dotnet /usr/share/dotnet; do
++			if [ -x "$CANDIDATE/dotnet" ]; then
++				export DOTNET_ROOT="$CANDIDATE"
++				export PATH="$CANDIDATE:$PATH"
++				break
++			fi
++		done
++	fi
++	if command -v dotnet >/dev/null 2>&1; then
++		[ -z "$DOTNET_ROOT" ] && export DOTNET_ROOT="$(dirname "$(command -v dotnet)")"
++		IS_DOTNET_INSTALLED=1
++		echo "Using system arm64 .NET SDK: $(command -v dotnet) ($(dotnet --version 2>/dev/null))"
++	else
++		echo "ERROR: aarch64 host but no system dotnet found (install an arm64 .NET SDK to ~/.dotnet)"
++	fi
++fi
++
+ DOTNET_VERSION_PATH=$(command -v dotnet) || true
+ 
+-if [ "$UE_USE_SYSTEM_DOTNET" == "1" ] && [ ! $DOTNET_VERSION_PATH == "" ] && [ -f $DOTNET_VERSION_PATH ]; then
++if [ $IS_DOTNET_INSTALLED -eq 0 ] && [ "$UE_USE_SYSTEM_DOTNET" == "1" ] && [ ! $DOTNET_VERSION_PATH == "" ] && [ -f $DOTNET_VERSION_PATH ]; then
+ 	# If dotnet is installed, check that it has a new enough version of the SDK
+ 	DOTNET_SDKS=(`dotnet --list-sdks | grep -P "(\d*)\.(\d*)\..* \[(.*)\]"`)
+ 	for DOTNET_SDK in $DOTNET_SDKS
+diff --git a/Engine/Config/BaseEngine.ini b/Engine/Config/BaseEngine.ini
+index a3fbcba0b..3d61bc46d 100644
+--- a/Engine/Config/BaseEngine.ini
++++ b/Engine/Config/BaseEngine.ini
+@@ -2494,7 +2494,10 @@ Shared=(Host=None, Namespace="ue.ddc", EnvHostOverride=UE-ZenSharedDataCacheHost
+ 
+ [DerivedDataBackendGraph]
+ ; Configure the hierarchy as the root of the cache. Reads access the nodes in order until satisfied. Writes go to every writable node.
+-Root=(Type=Hierarchical, Inner=Pak, Inner=EnginePak, Inner=ZenLocal, Inner=Local, Inner=ZenShared, Inner=Shared, Inner=Cloud)
++; NOTE(aarch64): Zen's server binary is x86_64-only and cannot auto-launch on this host, so ZenLocal/ZenShared
++; never provide a writable node. Drop them from the graph and rely on the filesystem 'Local' cache made
++; read/write below, so the DDC has a valid writable node and the editor can boot.
++Root=(Type=Hierarchical, Inner=Pak, Inner=EnginePak, Inner=Local, Inner=Shared, Inner=Cloud)
+ ; Configure the local cache. This is a FileSystem cache with the following parameters:
+ ;	ReadOnly: Can data be written to this layer. Default is false.
+ ;	Touch: Update timestamps on every access instead of only after 1/4 of UnusedFileAge. Default is false.
+@@ -2517,7 +2520,7 @@ Root=(Type=Hierarchical, Inner=Pak, Inner=EnginePak, Inner=ZenLocal, Inner=Local
+ ;		ValueOnly: Look only for compressed data in the 5.0+ directory layout.
+ ;		LegacyOnly: Look only for uncompressed data in the pre-5.0 directory layout.
+ ;		ValueWithLegacyFallback: Look in the 5.0+ location but fall back to the pre-5.0 location on miss.
+-Local=(Type=FileSystem, DeleteOnly=true, UnusedFileAge=8, Path=%ENGINEDIR%DerivedDataCache, EnvPathOverride=UE-LocalDataCachePath, EditorOverrideSetting=LocalDerivedDataCache, CommandLineOverride=LocalDataCachePath)
++Local=(Type=FileSystem, UnusedFileAge=8, Path=%ENGINEDIR%DerivedDataCache, EnvPathOverride=UE-LocalDataCachePath, EditorOverrideSetting=LocalDerivedDataCache, CommandLineOverride=LocalDataCachePath)
+ ; Configure the shared cache that is accessed after local.
+ Shared=(Type=FileSystem, UnusedFileAge=10, FoldersToClean=10, ConsiderSlowAt=70, Path=?EpicDDC, EnvPathOverride=UE-SharedDataCachePath, EditorOverrideSetting=SharedDerivedDataCache, CommandLineOverride=SharedDataCachePath)
+ ; Configure the cloud cache that is accessed after shared.
+diff --git a/Engine/Plugins/Compression/OodleNetwork/Source/OodleNetworkHandlerComponent.Build.cs b/Engine/Plugins/Compression/OodleNetwork/Source/OodleNetworkHandlerComponent.Build.cs
+index 701caaa07..baca27e02 100644
+--- a/Engine/Plugins/Compression/OodleNetwork/Source/OodleNetworkHandlerComponent.Build.cs
++++ b/Engine/Plugins/Compression/OodleNetwork/Source/OodleNetworkHandlerComponent.Build.cs
+@@ -57,8 +57,8 @@ public class OodleNetworkHandlerComponent : ModuleRules
+ 		}
+ 		else if (Target.Platform == UnrealTargetPlatform.Linux)
+ 		{
+-			ReleaseLib = "liboo2netlinux64.a";
+-			DebugLib = "liboo2netlinux64_dbg.a";
++			if (Target.Architecture == UnrealArch.Arm64) { ReleaseLib = "liboo2netlinuxarm64.a"; DebugLib = "liboo2netlinuxarm64_dbg.a"; PlatformDir = "LinuxArm64"; }
++			else { ReleaseLib = "liboo2netlinux64.a"; DebugLib = "liboo2netlinux64_dbg.a"; }
+ 		}
+ 		else if (Target.Platform == UnrealTargetPlatform.LinuxArm64)
+ 		{
+diff --git a/Engine/Plugins/Developer/N10XSourceCodeAccess/N10XSourceCodeAccess.uplugin b/Engine/Plugins/Developer/N10XSourceCodeAccess/N10XSourceCodeAccess.uplugin
+index c6447a518..98c22b5a8 100644
+--- a/Engine/Plugins/Developer/N10XSourceCodeAccess/N10XSourceCodeAccess.uplugin
++++ b/Engine/Plugins/Developer/N10XSourceCodeAccess/N10XSourceCodeAccess.uplugin
+@@ -10,7 +10,7 @@
+ 	"DocsURL" : "",
+ 	"MarketplaceURL" : "",
+ 	"SupportURL" : "",
+-	"EnabledByDefault" : true,
++	"EnabledByDefault": false,
+ 	"CanContainContent" : false,
+ 	"IsBetaVersion" : false,
+ 	"Installed" : false,
+diff --git a/Engine/Plugins/Developer/PerforceSourceControl/PerforceSourceControl.uplugin b/Engine/Plugins/Developer/PerforceSourceControl/PerforceSourceControl.uplugin
+index 876d5139e..20ca70549 100644
+--- a/Engine/Plugins/Developer/PerforceSourceControl/PerforceSourceControl.uplugin
++++ b/Engine/Plugins/Developer/PerforceSourceControl/PerforceSourceControl.uplugin
+@@ -10,7 +10,7 @@
+ 	"DocsURL" : "",
+ 	"MarketplaceURL" : "",
+ 	"SupportURL" : "",
+-	"EnabledByDefault" : true,
++	"EnabledByDefault": false,
+ 	"CanContainContent" : false,
+ 	"IsBetaVersion" : false,
+ 	"Installed" : false,
+diff --git a/Engine/Plugins/Editor/ChangelistReview/ChangelistReview.uplugin b/Engine/Plugins/Editor/ChangelistReview/ChangelistReview.uplugin
+index 85bf01ad0..e8c8c3034 100644
+--- a/Engine/Plugins/Editor/ChangelistReview/ChangelistReview.uplugin
++++ b/Engine/Plugins/Editor/ChangelistReview/ChangelistReview.uplugin
+@@ -8,7 +8,7 @@
+ 	"CreatedBy": "Epic Games, Inc.",
+ 	"CreatedByURL": "http://epicgames.com",
+ 	"DocsURL": "",
+-	"EnabledByDefault": true,
++	"EnabledByDefault": false,
+ 	"MarketplaceURL": "",
+ 	"SupportURL": "",
+ 	"CanContainContent": false,
+diff --git a/Engine/Plugins/Editor/MacGraphicsSwitching/MacGraphicsSwitching.uplugin b/Engine/Plugins/Editor/MacGraphicsSwitching/MacGraphicsSwitching.uplugin
+index 94b74d7b9..701ca0763 100644
+--- a/Engine/Plugins/Editor/MacGraphicsSwitching/MacGraphicsSwitching.uplugin
++++ b/Engine/Plugins/Editor/MacGraphicsSwitching/MacGraphicsSwitching.uplugin
+@@ -10,7 +10,7 @@
+ 	"DocsURL" : "",
+ 	"MarketplaceURL" : "",
+ 	"SupportURL" : "",
+-	"EnabledByDefault" : true,
++	"EnabledByDefault": false,
+ 	"CanContainContent" : false,
+ 	"IsBetaVersion" : false,
+ 	"Installed" : false,
+diff --git a/Engine/Plugins/Experimental/PlatformCrypto/PlatformCrypto.uplugin b/Engine/Plugins/Experimental/PlatformCrypto/PlatformCrypto.uplugin
+index c5a5394f5..a11ff2fa8 100644
+--- a/Engine/Plugins/Experimental/PlatformCrypto/PlatformCrypto.uplugin
++++ b/Engine/Plugins/Experimental/PlatformCrypto/PlatformCrypto.uplugin
+@@ -10,7 +10,7 @@
+ 	"DocsURL": "",
+ 	"MarketplaceURL": "",
+ 	"SupportURL": "",
+-	"EnabledByDefault": true,
++	"EnabledByDefault": false,
+ 	"CanContainContent": false,
+ 	"IsBetaVersion": false,
+ 	"Installed": false,
+diff --git a/Engine/Plugins/FastBuildController/FastBuildController.uplugin b/Engine/Plugins/FastBuildController/FastBuildController.uplugin
+index 7434304aa..5f2e51b40 100644
+--- a/Engine/Plugins/FastBuildController/FastBuildController.uplugin
++++ b/Engine/Plugins/FastBuildController/FastBuildController.uplugin
+@@ -10,7 +10,7 @@
+ 	"DocsURL" : "",
+ 	"MarketplaceURL" : "",
+ 	"SupportURL" : "",
+-	"EnabledByDefault" : true,
++	"EnabledByDefault" : false,
+ 	"CanContainContent" : false,
+ 	"IsBetaVersion" : false,
+ 	"Installed" : false,
+diff --git a/Engine/Plugins/Importers/USDImporter/Source/UnrealUSDWrapper/UnrealUSDWrapper.Build.cs b/Engine/Plugins/Importers/USDImporter/Source/UnrealUSDWrapper/UnrealUSDWrapper.Build.cs
+index eacd56f2b..f303da467 100644
+--- a/Engine/Plugins/Importers/USDImporter/Source/UnrealUSDWrapper/UnrealUSDWrapper.Build.cs
++++ b/Engine/Plugins/Importers/USDImporter/Source/UnrealUSDWrapper/UnrealUSDWrapper.Build.cs
+@@ -180,6 +180,14 @@ namespace UnrealBuildTool.Rules
+ 				Target.StaticAnalyzer == StaticAnalyzer.None
+ 			);
+ 
++			// No arm64 Pixar USD SDK ships here (it needs USD/Python/Boost.Python builds not yet ported),
++			// and the Linux branch would throw enumerating a missing aarch64 USD bin dir. Disable the USD
++			// SDK on arm64 so this module compiles with USD unavailable and the editor can build.
++			if (Target.Architecture == UnrealArch.Arm64)
++			{
++				bEnableUsdSdk = false;
++			}
++
+ 			// Don't enable USD when running the include tool because it has issues parsing Boost headers
+ 			if (Target.GlobalDefinitions.Contains("UE_INCLUDE_TOOL=1"))
+ 			{
+diff --git a/Engine/Plugins/Media/ImgMedia/Source/ImgMedia/ImgMedia.Build.cs b/Engine/Plugins/Media/ImgMedia/Source/ImgMedia/ImgMedia.Build.cs
+index 0be6f7b0a..32b3586dd 100644
+--- a/Engine/Plugins/Media/ImgMedia/Source/ImgMedia/ImgMedia.Build.cs
++++ b/Engine/Plugins/Media/ImgMedia/Source/ImgMedia/ImgMedia.Build.cs
+@@ -40,7 +40,7 @@ namespace UnrealBuildTool.Rules
+ 					"TimeManagement",
+ 				});
+ 
+-			bool bLinuxEnabled = Target.Platform == UnrealTargetPlatform.Linux && Target.Architecture == UnrealArch.X64;
++			bool bLinuxEnabled = Target.Platform == UnrealTargetPlatform.Linux && (Target.Architecture == UnrealArch.X64 || Target.Architecture == UnrealArch.Arm64);
+ 
+ 			if ((Target.Platform == UnrealTargetPlatform.Mac) ||
+ 				Target.Platform.IsInGroup(UnrealPlatformGroup.Windows) ||
+diff --git a/Engine/Plugins/Media/ImgMedia/Source/ImgMediaEditor/ImgMediaEditor.Build.cs b/Engine/Plugins/Media/ImgMedia/Source/ImgMediaEditor/ImgMediaEditor.Build.cs
+index 5fa35bed3..a26d6a4b2 100644
+--- a/Engine/Plugins/Media/ImgMedia/Source/ImgMediaEditor/ImgMediaEditor.Build.cs
++++ b/Engine/Plugins/Media/ImgMedia/Source/ImgMediaEditor/ImgMediaEditor.Build.cs
+@@ -42,7 +42,7 @@ namespace UnrealBuildTool.Rules
+ 				});
+ 			}
+ 
+-			bool bLinuxEnabled = Target.Platform == UnrealTargetPlatform.Linux && Target.Architecture == UnrealArch.X64;
++			bool bLinuxEnabled = Target.Platform == UnrealTargetPlatform.Linux && (Target.Architecture == UnrealArch.X64 || Target.Architecture == UnrealArch.Arm64);
+ 
+ 			// Add EXR support.
+ 			if ((Target.Platform == UnrealTargetPlatform.Mac) ||
+diff --git a/Engine/Plugins/Media/ImgMedia/Source/OpenExrWrapper/OpenExrWrapper.Build.cs b/Engine/Plugins/Media/ImgMedia/Source/OpenExrWrapper/OpenExrWrapper.Build.cs
+index 78359e3fc..e2e31ec1f 100644
+--- a/Engine/Plugins/Media/ImgMedia/Source/OpenExrWrapper/OpenExrWrapper.Build.cs
++++ b/Engine/Plugins/Media/ImgMedia/Source/OpenExrWrapper/OpenExrWrapper.Build.cs
+@@ -15,7 +15,8 @@ namespace UnrealBuildTool.Rules
+ 					"TimeManagement",
+ 				});
+ 
+-			bool bLinuxEnabled = Target.Platform == UnrealTargetPlatform.Linux && Target.Architecture == UnrealArch.X64;
++			// arm64 enabled: OpenEXR 3.2.1 + Imath 3.1.9 are built from in-tree source for aarch64.
++			bool bLinuxEnabled = Target.Platform == UnrealTargetPlatform.Linux && (Target.Architecture == UnrealArch.X64 || Target.Architecture == UnrealArch.Arm64);
+ 
+             if (Target.Platform.IsInGroup(UnrealPlatformGroup.Windows) ||
+                 (Target.Platform == UnrealTargetPlatform.Mac) ||
+diff --git a/Engine/Plugins/Media/WmfMedia/WmfMedia.uplugin b/Engine/Plugins/Media/WmfMedia/WmfMedia.uplugin
+index debaf8a93..dee58f709 100644
+--- a/Engine/Plugins/Media/WmfMedia/WmfMedia.uplugin
++++ b/Engine/Plugins/Media/WmfMedia/WmfMedia.uplugin
+@@ -10,7 +10,7 @@
+ 	"DocsURL" : "https://forums.unrealengine.com/showthread.php?46879-Media-Framework-Documentation-for-4-5-Preview",
+ 	"MarketplaceURL" : "",
+ 	"SupportURL" : "",
+-	"EnabledByDefault" : true,
++	"EnabledByDefault": false,
+ 	"CanContainContent" : false,
+ 	"IsBetaVersion" : false,
+ 	"Installed" : false,
+diff --git a/Engine/Plugins/Runtime/GoogleCloudMessaging/GoogleCloudMessaging.uplugin b/Engine/Plugins/Runtime/GoogleCloudMessaging/GoogleCloudMessaging.uplugin
+index ea07588af..49fa4460b 100644
+--- a/Engine/Plugins/Runtime/GoogleCloudMessaging/GoogleCloudMessaging.uplugin
++++ b/Engine/Plugins/Runtime/GoogleCloudMessaging/GoogleCloudMessaging.uplugin
+@@ -7,7 +7,7 @@
+ 	"Category": "Online Platform",
+ 	"CreatedBy": "Epic Games, Inc.",
+ 	"CreatedByURL": "https://epicgames.com",
+-	"EnabledByDefault": true,
++	"EnabledByDefault": false,
+ 	"Installed": false,
+ 	"Modules": [
+ 		{
+diff --git a/Engine/Source/Developer/AudioFormatBink/AudioFormatBink.Build.cs b/Engine/Source/Developer/AudioFormatBink/AudioFormatBink.Build.cs
+index a1ee4b037..8381fcd09 100644
+--- a/Engine/Source/Developer/AudioFormatBink/AudioFormatBink.Build.cs
++++ b/Engine/Source/Developer/AudioFormatBink/AudioFormatBink.Build.cs
+@@ -22,7 +22,10 @@ public class AudioFormatBink : ModuleRules
+ 		}
+ 		if (Target.Platform == UnrealTargetPlatform.Linux)
+ 		{
+-			PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "..", "..", "Runtime", "BinkAudioDecoder", "SDK", "BinkAudio", "Lib", "libbinka_ue_encode_lnx64_static.a"));
++			// No arm64 Bink encoder exists (proprietary, x86-only). On aarch64 link a stub so the
++			// module builds; Bink audio *encoding* (cook-time) is unavailable there.
++			string BinkEncodeLib = (Target.Architecture == UnrealArch.Arm64) ? "libbinka_ue_encode_lnxarm64_static.a" : "libbinka_ue_encode_lnx64_static.a";
++			PublicAdditionalLibraries.Add(Path.Combine(ModuleDirectory, "..", "..", "Runtime", "BinkAudioDecoder", "SDK", "BinkAudio", "Lib", BinkEncodeLib));
+ 		}
+ 		if (Target.Platform == UnrealTargetPlatform.Mac)
+ 		{
+diff --git a/Engine/Source/Developer/MeshUtilities/Private/MeshDistanceFieldUtilities.cpp b/Engine/Source/Developer/MeshUtilities/Private/MeshDistanceFieldUtilities.cpp
+index 4edf15fe9..50b40d209 100644
+--- a/Engine/Source/Developer/MeshUtilities/Private/MeshDistanceFieldUtilities.cpp
++++ b/Engine/Source/Developer/MeshUtilities/Private/MeshDistanceFieldUtilities.cpp
+@@ -532,7 +532,7 @@ void FMeshUtilities::GenerateSignedDistanceFieldVolumeData(
+ 	const FStaticMeshLODResources& LODModel,
+ 	class FQueuedThreadPool& ThreadPool,
+ 	const TArray<FSignedDistanceFieldBuildSectionData>& SectionData,
+-	const FBoxSphereBounds& Bounds,
++	const FBoxSphereBounds3f& Bounds,
+ 	float DistanceFieldResolutionScale,
+ 	bool bGenerateAsIfTwoSided,
+ 	FDistanceFieldVolumeData& OutData)
+diff --git a/Engine/Source/Developer/NaniteBuilder/Private/NaniteRayTracingEncode.cpp b/Engine/Source/Developer/NaniteBuilder/Private/NaniteRayTracingEncode.cpp
+index 3da767184..3d7ab51e2 100644
+--- a/Engine/Source/Developer/NaniteBuilder/Private/NaniteRayTracingEncode.cpp
++++ b/Engine/Source/Developer/NaniteBuilder/Private/NaniteRayTracingEncode.cpp
+@@ -10,6 +10,9 @@
+ #include "Async/ParallelFor.h"
+ #include "Misc/Compression.h"
+ 
++// Nanite hardware-ray-tracing BVH encoding is built with Intel Embree, which has no arm64 build
++// here (USE_EMBREE=0). Guard the whole implementation and provide a no-op fallback below.
++#if USE_EMBREE
+ #include <embree3/rtcore.h>
+ #include <embree3/rtcore_builder.h>
+ 
+@@ -541,3 +544,15 @@ void BuildRayTracingData(FResources& Resources, TArray< FCluster >& Clusters)
+ 
+ } // namespace Nanite
+ 
++#else // USE_EMBREE
++
++namespace Nanite
++{
++	// Embree unavailable on this platform: Nanite ray-tracing streaming data is left empty.
++	void BuildRayTracingData(FResources& Resources, TArray<FCluster>& Clusters)
++	{
++	}
++} // namespace Nanite
++
++#endif // USE_EMBREE
++
+diff --git a/Engine/Source/Programs/GitDependencies/GitDependencies.csproj b/Engine/Source/Programs/GitDependencies/GitDependencies.csproj
+index 0979d00b8..0cd617920 100644
+--- a/Engine/Source/Programs/GitDependencies/GitDependencies.csproj
++++ b/Engine/Source/Programs/GitDependencies/GitDependencies.csproj
+@@ -1,6 +1,6 @@
+ <Project Sdk="Microsoft.NET.Sdk">
+   <PropertyGroup>
+-    <TargetFramework>net6.0</TargetFramework>
++    <TargetFramework>net8.0</TargetFramework>
+     <Configuration Condition=" '$(Configuration)' == '' ">Development</Configuration>
+     <OutputType>Exe</OutputType>
+ 	<PublishTrimmed>false</PublishTrimmed>
+diff --git a/Engine/Source/Programs/GitDependencies/Program.cs b/Engine/Source/Programs/GitDependencies/Program.cs
+index 395ec380c..e4bed6e25 100644
+--- a/Engine/Source/Programs/GitDependencies/Program.cs
++++ b/Engine/Source/Programs/GitDependencies/Program.cs
+@@ -815,9 +815,12 @@ namespace GitDependencies
+ 		/// <returns></returns>
+ 		public static int GetFileMode_Linux(string FileName)
+ 		{
+-			stat64_linux_t stat = new stat64_linux_t();
+-			int Result = stat64_linux(1, FileName, stat);
+-			return (Result >= 0) ? (int)stat.st_mode : -1;
++			// NOTE: the legacy __xstat64 P/Invoke below assumes the x86_64 glibc _STAT_VER
++			// and struct-stat layout, which is wrong on aarch64 (returns EINVAL). Use the
++			// managed, architecture-independent UnixFileMode API (net7+) instead. The enum's
++			// integer value is the POSIX permission bits, so callers' bit math is unchanged.
++			try { return (int)File.GetUnixFileMode(FileName); }
++			catch { return -1; }
+ 		}
+ 
+ 		/// <summary>
+@@ -827,7 +830,9 @@ namespace GitDependencies
+ 		/// <param name="Mode"></param>
+ 		public static int SetFileMode_Linux(string FileName, ushort Mode)
+ 		{
+-			return chmod_linux(FileName, Mode);
++			// Managed replacement for the chmod P/Invoke; arch-independent. Returns 0 on success.
++			try { File.SetUnixFileMode(FileName, (UnixFileMode)Mode); return 0; }
++			catch { return -1; }
+ 		}
+ 
+ 		#region Mac Native File Methods
+diff --git a/Engine/Source/Programs/Shared/EpicGames.Build/Unreal.cs b/Engine/Source/Programs/Shared/EpicGames.Build/Unreal.cs
+index 2eac2f15d..57511971d 100644
+--- a/Engine/Source/Programs/Shared/EpicGames.Build/Unreal.cs
++++ b/Engine/Source/Programs/Shared/EpicGames.Build/Unreal.cs
+@@ -183,7 +183,38 @@ namespace UnrealBuildBase
+ 		/// <summary>
+ 		/// The path of the bundled dotnet executable
+ 		/// </summary>
+-		static public readonly FileReference DotnetPath = FileReference.Combine(DotnetDirectory, "dotnet" + RuntimePlatform.ExeExtension);
++		static public readonly FileReference DotnetPath = ResolveDotnetPath();
++
++		/// <summary>
++		/// Resolves the dotnet host used for recursive UBT invocations (e.g. WriteMetadata actions).
++		/// On aarch64 Linux there is no bundled linux-arm64 dotnet - the bundled "linux" build is
++		/// x86_64 and cannot execute natively - so fall back to the system dotnet that is already
++		/// hosting this UBT process.
++		/// </summary>
++		static private FileReference ResolveDotnetPath()
++		{
++			if (RuntimePlatform.Current == RuntimePlatform.Type.Linux
++				&& RuntimeInformation.ProcessArchitecture == Architecture.Arm64)
++			{
++				string? ProcPath = Environment.ProcessPath;
++				if (!string.IsNullOrEmpty(ProcPath) && Path.GetFileNameWithoutExtension(ProcPath) == "dotnet")
++				{
++					return new FileReference(ProcPath);
++				}
++
++				string? DotnetRoot = Environment.GetEnvironmentVariable("DOTNET_ROOT");
++				if (!string.IsNullOrEmpty(DotnetRoot))
++				{
++					FileReference SystemDotnet = FileReference.Combine(new DirectoryReference(DotnetRoot), "dotnet");
++					if (FileReference.Exists(SystemDotnet))
++					{
++						return SystemDotnet;
++					}
++				}
++			}
++
++			return FileReference.Combine(DotnetDirectory, "dotnet" + RuntimePlatform.ExeExtension);
++		}
+ 
+ 		/// <summary>
+ 		/// Whether we're running on a build machine
+diff --git a/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxCommon.cs b/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxCommon.cs
+index aa00470d9..449cf3f58 100644
+--- a/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxCommon.cs
++++ b/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxCommon.cs
+@@ -12,7 +12,13 @@ namespace UnrealBuildTool
+ 		{
+ 			Process proc = new Process();
+ 			proc.StartInfo.FileName = "/bin/sh";
+-			proc.StartInfo.Arguments = System.String.Format("-c 'which {0}'", name);
++			// NOTE: use ArgumentList so each argv element is passed verbatim. Setting
++			// StartInfo.Arguments = "-c 'which name'" is broken on Linux: .NET's argument
++			// parser does not honor single quotes, so the shell received mangled argv and
++			// the lookup always failed (returning null). This only surfaced with the system-
++			// compiler path on aarch64. 'command -v' is POSIX and needs no external binary.
++			proc.StartInfo.ArgumentList.Add("-c");
++			proc.StartInfo.ArgumentList.Add(System.String.Format("command -v {0}", name));
+ 			proc.StartInfo.UseShellExecute = false;
+ 			proc.StartInfo.CreateNoWindow = true;
+ 			proc.StartInfo.RedirectStandardOutput = true;
+diff --git a/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxPlatformSDK.cs b/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxPlatformSDK.cs
+index a4c37a446..c574c5002 100644
+--- a/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxPlatformSDK.cs
++++ b/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxPlatformSDK.cs
+@@ -166,6 +166,14 @@ namespace UnrealBuildTool
+ 			if (bForceUseSystemCompiler == -1)
+ 			{
+ 				bForceUseSystemCompiler = 0;
++
++				// aarch64 hosts (e.g. NVIDIA GB10) have no bundled Epic clang toolchain, so the
++				// system clang is the only option - force it on by default.
++				if (System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64)
++				{
++					bForceUseSystemCompiler = 1;
++				}
++
+ 				string[] CmdLine = Environment.GetCommandLineArgs();
+ 
+ 				foreach (string CmdLineArg in CmdLine)
+diff --git a/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxToolChain.cs b/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxToolChain.cs
+index 1b19b5895..6be0527a0 100644
+--- a/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxToolChain.cs
++++ b/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxToolChain.cs
+@@ -54,11 +54,12 @@ namespace UnrealBuildTool
+ 		public LinuxToolChain(UnrealArch InArchitecture, LinuxPlatformSDK InSDK, ClangToolChainOptions InOptions, ILogger InLogger)
+ 			: this(UnrealTargetPlatform.Linux, InArchitecture, InSDK, InOptions, InLogger)
+ 		{
+-			// prevent unknown clangs since the build is likely to fail on too old or too new compilers
+-			if (CompilerVersionLessThan(15, 0, 0) || CompilerVersionGreaterOrEqual(17, 0, 0))
++			// prevent unknown clangs since the build is likely to fail on too old or too new compilers.
++			// Upper bound raised to 19 to permit clang 18 (only system clang available on aarch64 hosts).
++			if (CompilerVersionLessThan(15, 0, 0) || CompilerVersionGreaterOrEqual(19, 0, 0))
+ 			{
+ 				throw new BuildException(
+-					String.Format("This version of the Unreal Engine can only be compiled with clang 15.x or 16.x. clang {0} may not build it - please use a different version.",
++					String.Format("This version of the Unreal Engine can only be compiled with clang 15.x to 18.x. clang {0} may not build it - please use a different version.",
+ 						Info.ClangVersion)
+ 					);
+ 			}
+@@ -169,7 +170,12 @@ namespace UnrealBuildTool
+ 			StringWriter Out = new StringWriter();
+ 			Out.NewLine = bUseCmdExe ? "\r\n" : "\n";
+ 
+-			if (!Options.HasFlag(ClangToolChainOptions.DisableDumpSyms) || Options.HasFlag(ClangToolChainOptions.PreservePSYM))
++			// The bundled dump_syms and BreakpadEncoder are x86_64 binaries and cannot run on an
++			// aarch64 host (Exec format error). Skip breakpad symbol generation there and emit the
++			// dummy files instead, until an aarch64 dump_syms/BreakpadEncoder is available.
++			bool bDumpSymsHostUnsupported = System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64;
++
++			if (!bDumpSymsHostUnsupported && (!Options.HasFlag(ClangToolChainOptions.DisableDumpSyms) || Options.HasFlag(ClangToolChainOptions.PreservePSYM)))
+ 			{
+ 				// dump_syms
+ 				Out.WriteLine(DumpCommand,
+@@ -292,6 +298,17 @@ namespace UnrealBuildTool
+ 			return false;
+ 		}
+ 
++		/// <summary>
++		/// On aarch64 hosts (e.g. NVIDIA GB10) there is no bundled Epic libc++ matching the system
++		/// clang-18, and UE's bundled libc++ headers are too old to parse under clang 18. Use the
++		/// system libc++ instead (via -stdlib=libc++). libc++ keeps a stable ABI, so this remains
++		/// link-compatible with Epic's prebuilt aarch64 third-party libraries.
++		/// </summary>
++		private static bool ShouldUseSystemLibcxx()
++		{
++			return System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64;
++		}
++
+ 		/// <inheritdoc/>
+ 		protected override void GetCompileArguments_WarningsAndErrors(CppCompileEnvironment CompileEnvironment, List<string> Arguments)
+ 		{
+@@ -300,6 +317,13 @@ namespace UnrealBuildTool
+ 			//Arguments.Add("-Wunreachable-code");            // additional warning not normally included in Wall: warns if there is code that will never be executed - not helpful due to bIsGCC and similar
+ 
+ 			Arguments.Add("-Wno-undefined-bool-conversion"); // hides checking if 'this' pointer is null
++
++			// clang 17/18 promote several constructs to warnings that UE 5.4 (written for clang 16)
++			// trips over. Downgrade the ones that are pervasive in engine code so -Werror doesn't fail.
++			if (CompilerVersionGreaterOrEqual(17, 0, 0))
++			{
++				Arguments.Add("-Wno-vla-cxx-extension");            // variable-length arrays used in a few engine .cpp files
++			}
+ 		}
+ 
+ 		private void AddLTOFlags(List<string> Arguments, bool bForLinker)
+@@ -547,9 +571,20 @@ namespace UnrealBuildTool
+ 			Arguments.Add("--driver-mode=g++");
+ 			if (ShouldUseLibcxx())
+ 			{
+-				Arguments.Add("-nostdinc++");
+-				Arguments.Add(GetSystemIncludePathArgument(DirectoryReference.Combine(Unreal.EngineSourceDirectory, "ThirdParty", "Unix", "LibCxx", "include")));
+-				Arguments.Add(GetSystemIncludePathArgument(DirectoryReference.Combine(Unreal.EngineSourceDirectory, "ThirdParty", "Unix", "LibCxx", "include", "c++", "v1")));
++				if (ShouldUseSystemLibcxx())
++				{
++					// Select the system libc++ (matches system clang). Added at the GLOBAL level so the
++					// shared PCH and every C/C++ TU use the SAME standard library - mixing libc++ here
++					// with a libstdc++-built PCH causes 'redefinition of byte' etc. The resulting
++					// "unused during compilation" warning on C files is silenced in GetCompileArguments_C.
++					Arguments.Add("-stdlib=libc++");
++				}
++				else
++				{
++					Arguments.Add("-nostdinc++");
++					Arguments.Add(GetSystemIncludePathArgument(DirectoryReference.Combine(Unreal.EngineSourceDirectory, "ThirdParty", "Unix", "LibCxx", "include")));
++					Arguments.Add(GetSystemIncludePathArgument(DirectoryReference.Combine(Unreal.EngineSourceDirectory, "ThirdParty", "Unix", "LibCxx", "include", "c++", "v1")));
++				}
+ 			}
+ 
+ 			if (CompilerVersionGreaterOrEqual(12, 0, 0))
+@@ -618,6 +653,19 @@ namespace UnrealBuildTool
+ 			}
+ 		}
+ 
++		/// <inheritdoc/>
++		protected override void GetCompileArguments_C(CppCompileEnvironment CompileEnvironment, List<string> Arguments)
++		{
++			base.GetCompileArguments_C(CompileEnvironment, Arguments);
++
++			// -stdlib=libc++ is added globally (for C++/PCH consistency) but is unused when compiling
++			// C sources; silence the resulting -Wunused-command-line-argument so -Werror doesn't fail.
++			if (ShouldUseLibcxx() && ShouldUseSystemLibcxx())
++			{
++				Arguments.Add("-Wno-unused-command-line-argument");
++			}
++		}
++
+ 		/// <inheritdoc/>
+ 		protected override string EscapePreprocessorDefinition(string Definition)
+ 		{
+@@ -1405,16 +1453,27 @@ namespace UnrealBuildTool
+ 
+ 			if (ShouldUseLibcxx())
+ 			{
+-				// libc++ and its abi lib
+-				LinkCommandString += " -nodefaultlibs";
+-				LinkCommandString += " -L" + "ThirdParty/Unix/LibCxx/lib/Unix/" + LinkEnvironment.Architecture.LinuxName + "/";
+-				LinkCommandString += " " + "ThirdParty/Unix/LibCxx/lib/Unix/" + LinkEnvironment.Architecture.LinuxName + "/libc++.a";
+-				LinkCommandString += " " + "ThirdParty/Unix/LibCxx/lib/Unix/" + LinkEnvironment.Architecture.LinuxName + "/libc++abi.a";
+-				LinkCommandString += " -lm";
+-				LinkCommandString += " -lc";
+-				LinkCommandString += " -lpthread"; // pthread_mutex_trylock is missing from libc stubs
+-				LinkCommandString += " -lgcc_s";
+-				LinkCommandString += " -lgcc";
++				if (ShouldUseSystemLibcxx())
++				{
++					// Link the system libc++/libc++abi that match the system clang. Do not use
++					// -nodefaultlibs here so the driver supplies libc/libm/pthread/compiler-rt.
++					LinkCommandString += " -stdlib=libc++";
++					LinkCommandString += " -lc++";
++					LinkCommandString += " -lc++abi";
++				}
++				else
++				{
++					// libc++ and its abi lib
++					LinkCommandString += " -nodefaultlibs";
++					LinkCommandString += " -L" + "ThirdParty/Unix/LibCxx/lib/Unix/" + LinkEnvironment.Architecture.LinuxName + "/";
++					LinkCommandString += " " + "ThirdParty/Unix/LibCxx/lib/Unix/" + LinkEnvironment.Architecture.LinuxName + "/libc++.a";
++					LinkCommandString += " " + "ThirdParty/Unix/LibCxx/lib/Unix/" + LinkEnvironment.Architecture.LinuxName + "/libc++abi.a";
++					LinkCommandString += " -lm";
++					LinkCommandString += " -lc";
++					LinkCommandString += " -lpthread"; // pthread_mutex_trylock is missing from libc stubs
++					LinkCommandString += " -lgcc_s";
++					LinkCommandString += " -lgcc";
++				}
+ 			}
+ 
+ 			// these can be helpful for understanding the order of libraries or library search directories
+diff --git a/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/UEBuildLinux.cs b/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/UEBuildLinux.cs
+index fab754dca..368c7c5a6 100644
+--- a/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/UEBuildLinux.cs
++++ b/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/UEBuildLinux.cs
+@@ -24,7 +24,7 @@ namespace UnrealBuildTool
+ 		{
+ 			get
+ 			{
+-				if (AppleToolchainArchitectures.ContainsKey(this))
++				if (LinuxToolchainArchitectures.ContainsKey(this))
+ 				{
+ 					return LinuxToolchainArchitectures[this];
+ 				}
+@@ -157,7 +157,7 @@ namespace UnrealBuildTool
+ 	class LinuxArchitectureConfig : UnrealArchitectureConfig
+ 	{
+ 		public LinuxArchitectureConfig(UnrealTargetPlatform Platform)
+-			: base(Platform == UnrealTargetPlatform.Linux ? UnrealArch.X64 : UnrealArch.Arm64)
++			: base(Platform == UnrealTargetPlatform.Linux ? LinuxPlatform.DefaultHostArchitecture : UnrealArch.Arm64)
+ 		{
+ 		}
+ 	}
+@@ -165,10 +165,13 @@ namespace UnrealBuildTool
+ 	class LinuxPlatform : UEBuildPlatform
+ 	{
+ 		/// <summary>
+-		/// Linux host architecture (compiler target triplet)
+-		/// @todo Remove this and get the actual Host architecture?
++		/// Linux host architecture (compiler target triplet). Detected from the running host so that
++		/// native builds on an aarch64 host (e.g. NVIDIA GB10) select the Arm64 toolchain/sysroot
++		/// instead of assuming x86_64.
+ 		/// </summary>
+-		public static readonly UnrealArch DefaultHostArchitecture = UnrealArch.X64;
++		public static readonly UnrealArch DefaultHostArchitecture =
++			(System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64)
++				? UnrealArch.Arm64 : UnrealArch.X64;
+ 
+ 		/// <summary>
+ 		/// SDK in use by the platform
+@@ -280,6 +283,13 @@ namespace UnrealBuildTool
+ 
+ 			Target.bCompileISPC = true;
+ 
++			// The bundled ISPC compiler is an x86_64 binary targeting x86 ISAs; it cannot run on an
++			// aarch64 host. Disable ISPC there so modules use their C++ fallback paths (INTEL_ISPC=0).
++			if (Target.Architecture == UnrealArch.Arm64)
++			{
++				Target.bCompileISPC = false;
++			}
++
+ 			if (Target.bIWYU)
+ 			{
+ 				IWYUToolChain.ValidateTarget(Target);
+@@ -468,7 +478,14 @@ namespace UnrealBuildTool
+ 			DirectoryReference? BaseLinuxPath = SDK.GetBaseLinuxPathForArchitecture(Target.Architecture);
+ 			if (BuildHostPlatform.Current.Platform == UnrealTargetPlatform.Linux && BaseLinuxPath == null)
+ 			{
+-				CompileEnvironment.SystemIncludePaths.Add(new DirectoryReference("/usr/include"));
++				// On aarch64 hosts we compile with the system libc++ (-stdlib=libc++). Injecting
++				// /usr/include as an -isystem path here would place the C library headers ahead of
++				// libc++'s own wrapper headers (math.h, stdint.h, ...), breaking <cmath>/<cstdint>.
++				// clang already searches /usr/include natively in the correct order, so skip it.
++				if (System.Runtime.InteropServices.RuntimeInformation.OSArchitecture != System.Runtime.InteropServices.Architecture.Arm64)
++				{
++					CompileEnvironment.SystemIncludePaths.Add(new DirectoryReference("/usr/include"));
++				}
+ 			}
+ 
+ 			if (CompileEnvironment.bPGOOptimize != LinkEnvironment.bPGOOptimize)
+diff --git a/Engine/Source/Runtime/Core/Public/Unix/UnixPlatform.h b/Engine/Source/Runtime/Core/Public/Unix/UnixPlatform.h
+index f35fa0666..dd234c846 100644
+--- a/Engine/Source/Runtime/Core/Public/Unix/UnixPlatform.h
++++ b/Engine/Source/Runtime/Core/Public/Unix/UnixPlatform.h
+@@ -95,7 +95,10 @@ typedef FUnixPlatformTypes FPlatformTypes;
+ 	#define PLATFORM_ENABLE_VECTORINTRINSICS		1
+ #endif // defined(_M_IX86) || defined(__i386__) || defined(_M_X64) || defined(__x86_64__) || defined (__amd64__) 
+ 
+-#if PLATFORM_LINUXARM64
++// Enable NEON intrinsics for any aarch64 target. Keyed on the compiler's __aarch64__ macro
++// (not just PLATFORM_LINUXARM64) so native aarch64 host builds of the "Linux" platform also
++// select the NEON math path instead of the scalar FPU fallback.
++#if PLATFORM_LINUXARM64 || defined(__aarch64__)
+ 	// Enable NEON intrinsics for ARM64 builds
+ 	#define PLATFORM_ENABLE_VECTORINTRINSICS_NEON	1
+ 	#define PLATFORM_ENABLE_VECTORINTRINSICS		1
+diff --git a/Engine/Source/Runtime/Core/Public/Unix/UnixPlatformRunnableThread.h b/Engine/Source/Runtime/Core/Public/Unix/UnixPlatformRunnableThread.h
+index b49eba732..2f54567a7 100644
+--- a/Engine/Source/Runtime/Core/Public/Unix/UnixPlatformRunnableThread.h
++++ b/Engine/Source/Runtime/Core/Public/Unix/UnixPlatformRunnableThread.h
+@@ -23,8 +23,12 @@ class FRunnableThreadUnix : public FRunnableThreadPThread
+ 		{
+ 			UnixThreadNameLimit = 15,			// the limit for thread name is just 15 chars :( http://man7.org/linux/man-pages/man3/pthread_setname_np.3.html
+ 
+-			CrashHandlerStackSize = SIGSTKSZ + 192 * 1024,	// should be at least SIGSTKSIZE, plus 192K because we do logging and symbolication in crash handler
+-			CrashHandlerStackSizeMin = SIGSTKSZ + 8 * 1024  // minimum allowed stack size
++			// NOTE: SIGSTKSZ is no longer a compile-time constant in glibc >= 2.34 (it expands to
++			// sysconf(_SC_SIGSTKSZ)), so it cannot be used in an enum initializer. Use a fixed floor
++			// that is comfortably >= the runtime SIGSTKSZ on aarch64 (even with SVE register state).
++			CrashHandlerStackSizeFloor = 48 * 1024,
++			CrashHandlerStackSize = CrashHandlerStackSizeFloor + 192 * 1024,	// should be at least SIGSTKSIZE, plus 192K because we do logging and symbolication in crash handler
++			CrashHandlerStackSizeMin = CrashHandlerStackSizeFloor + 8 * 1024  // minimum allowed stack size
+ 		};
+ 	};
+ 
+diff --git a/Engine/Source/Runtime/OodleDataCompression/OodleDataCompression.Build.cs b/Engine/Source/Runtime/OodleDataCompression/OodleDataCompression.Build.cs
+index 668da92ec..a8d36d281 100644
+--- a/Engine/Source/Runtime/OodleDataCompression/OodleDataCompression.Build.cs
++++ b/Engine/Source/Runtime/OodleDataCompression/OodleDataCompression.Build.cs
+@@ -53,8 +53,19 @@ using UnrealBuildTool;
+ 			}
+ 			else if (Target.Platform == UnrealTargetPlatform.Linux)
+ 			{
+-				ReleaseLib = "liboo2corelinux64.a";
+-				DebugLib = "liboo2corelinux64_dbg.a";
++				// Select by architecture: a native aarch64 host build uses the "Linux" platform but
++				// must link the arm64 Oodle (the x86_64 lib is incompatible with elf64-littleaarch64).
++				if (Target.Architecture == UnrealArch.Arm64)
++				{
++					ReleaseLib = "liboo2corelinuxarm64.a";
++					DebugLib = "liboo2corelinuxarm64_dbg.a";
++					PlatformDir = "LinuxArm64";
++				}
++				else
++				{
++					ReleaseLib = "liboo2corelinux64.a";
++					DebugLib = "liboo2corelinux64_dbg.a";
++				}
+ 			}
+ 			else if (Target.Platform == UnrealTargetPlatform.LinuxArm64)
+ 			{
+diff --git a/Engine/Source/Runtime/Projects/Private/PluginManager.cpp b/Engine/Source/Runtime/Projects/Private/PluginManager.cpp
+index b801b41ce..23eb80dc5 100644
+--- a/Engine/Source/Runtime/Projects/Private/PluginManager.cpp
++++ b/Engine/Source/Runtime/Projects/Private/PluginManager.cpp
+@@ -2776,7 +2776,11 @@ bool FPluginManager::TryLoadModulesForPlugin( const FPlugin& Plugin, const ELoad
+ 
+ 			if ( FailureReason == EModuleLoadResult::FileNotFound )
+ 			{
+-				FailureMessage = FText::Format( LOCTEXT("PluginModuleNotFound", "Plugin '{0}' failed to load because module '{1}' could not be found.  Please ensure the plugin is properly installed, otherwise consider disabling the plugin for this project."), PluginNameText, TextModuleName );
++				// A plugin module binary that was never built (optional plugins excluded from a minimal
++				// build, e.g. the aarch64 editor) should not abort startup. Log a warning and skip this
++				// module so the editor can boot; the plugin's functionality is simply unavailable.
++				UE_LOG(LogPluginManager, Warning, TEXT("Plugin '%s' module '%s' binary was not found (not built); skipping. Plugin functionality will be unavailable."), *Plugin.Name, *TextModuleName.ToString());
++				continue;
+ 			}
+ 			else if ( FailureReason == EModuleLoadResult::FileIncompatible )
+ 			{
+diff --git a/Engine/Source/ThirdParty/Boost/Boost.Build.cs b/Engine/Source/ThirdParty/Boost/Boost.Build.cs
+index f257e2437..ebc171b8f 100644
+--- a/Engine/Source/ThirdParty/Boost/Boost.Build.cs
++++ b/Engine/Source/ThirdParty/Boost/Boost.Build.cs
+@@ -48,13 +48,19 @@ public class Boost : ModuleRules
+ 			string BoostLibPath = Path.Combine(BoostPath, "lib", "Unix", Target.Architecture.LinuxName);
+ 
+ 			string BoostLibArchSuffix = "x64";
+-			if (Target.Platform == UnrealTargetPlatform.LinuxArm64)
++			if (Target.Architecture == UnrealArch.Arm64)
+ 			{
+ 				BoostLibArchSuffix = "a64";
+ 			}
+ 
+ 			foreach (string BoostLib in BoostLibraries)
+ 			{
++				// boost_python is not shipped prebuilt for arm64 (a64) and is only needed for Python
++				// bindings (USD etc., disabled on arm64). Skip it so the link doesn't fail.
++				if (BoostLibArchSuffix == "a64" && BoostLib.StartsWith("python"))
++				{
++					continue;
++				}
+ 				string BoostLibName = "libboost_" + BoostLib + "-mt-" + BoostLibArchSuffix;
+ 				PublicAdditionalLibraries.Add(Path.Combine(BoostLibPath, BoostLibName + ".a"));
+ 
+diff --git a/Engine/Source/ThirdParty/FBX/2020.2/include/fbxsdk/core/arch/fbxarch.h b/Engine/Source/ThirdParty/FBX/2020.2/include/fbxsdk/core/arch/fbxarch.h
+index c8966ea24..8bcc12858 100644
+--- a/Engine/Source/ThirdParty/FBX/2020.2/include/fbxsdk/core/arch/fbxarch.h
++++ b/Engine/Source/ThirdParty/FBX/2020.2/include/fbxsdk/core/arch/fbxarch.h
+@@ -96,7 +96,7 @@
+ 	#elif defined(__arm__)
+ 		#define FBXSDK_ARCH_ARM 1
+ 		#define FBXSDK_CPU_32 1
+-    #elif defined(__arm64__)
++    #elif defined(__arm64__) || defined(__aarch64__)
+         #define FBXSDK_ARCH_ARM 1
+         #define FBXSDK_CPU_64 1
+ 	#else
+@@ -133,6 +133,9 @@
+ 	#elif defined(__x86_64__) || defined(__x86_64)
+ 		#define FBXSDK_ARCH_AMD64 1
+ 		#define FBXSDK_CPU_64 1
++	#elif defined(__aarch64__) || defined(__arm64__)
++		#define FBXSDK_ARCH_ARM 1
++		#define FBXSDK_CPU_64 1
+     #elif defined(__arm__)
+ 		#define FBXSDK_ARCH_ARM 1
+ 		#define FBXSDK_CPU_32 1
+diff --git a/Engine/Source/ThirdParty/FontConfig/FontConfig.Build.cs b/Engine/Source/ThirdParty/FontConfig/FontConfig.Build.cs
+index 28c195912..beaf29637 100644
+--- a/Engine/Source/ThirdParty/FontConfig/FontConfig.Build.cs
++++ b/Engine/Source/ThirdParty/FontConfig/FontConfig.Build.cs
+@@ -15,7 +15,13 @@ public class FontConfig : ModuleRules
+ 
+ 		PublicSystemIncludePaths.Add(Path.Combine(ThirdPartyDirectory, "FontConfig", FontConfigVersion, "include", "fontconfig"));
+ 
+-		if (Target.IsInPlatformGroup(UnrealPlatformGroup.Unix))
++		if (Target.IsInPlatformGroup(UnrealPlatformGroup.Unix) && Target.Architecture == UnrealArch.Arm64)
++		{
++			// No arm64 prebuilt fontconfig ships here; link the system libfontconfig (Ubuntu's
++			// libfontconfig-dev). The C API is stable so UE's bundled headers remain compatible.
++			PublicSystemLibraries.Add("fontconfig");
++		}
++		else if (Target.IsInPlatformGroup(UnrealPlatformGroup.Unix))
+ 		{
+ 			PublicAdditionalLibraries.Add(Path.Combine(ThirdPartyDirectory, "FontConfig", FontConfigVersion, "lib", "Unix", "x86_64-unknown-linux-gpu", "libfontconfig.a"));
+ 
+diff --git a/Engine/Source/ThirdParty/Intel/ISPCTexComp/IntelISPCTexComp.Build.cs b/Engine/Source/ThirdParty/Intel/ISPCTexComp/IntelISPCTexComp.Build.cs
+index 54f2db42d..600aa22b4 100644
+--- a/Engine/Source/ThirdParty/Intel/ISPCTexComp/IntelISPCTexComp.Build.cs
++++ b/Engine/Source/ThirdParty/Intel/ISPCTexComp/IntelISPCTexComp.Build.cs
+@@ -43,5 +43,12 @@ public class IntelISPCTexComp : ModuleRules
+             PublicDelayLoadDLLs.Add("libispc_texcomp.so");
+             RuntimeDependencies.Add(LibraryFilePath);
+         }
++        else if (Target.IsInPlatformGroup(UnrealPlatformGroup.Unix) && Target.Architecture == UnrealArch.Arm64)
++        {
++            // ISPC (Intel SPMD Program Compiler) targets x86 SIMD only, so there is no aarch64
++            // ispc_texcomp. Link a stub that satisfies the API so the engine builds/runs on ARM64;
++            // ISPC-based texture compression is a no-op there. See ispc_texcomp_stub_arm64.cpp.
++            PublicAdditionalLibraries.Add(BinaryFolder + "LinuxArm64-Release/libispc_texcomp.a");
++        }
+     }
+ }
+diff --git a/Engine/Source/ThirdParty/Intel/TBB/IntelTBB.Build.cs b/Engine/Source/ThirdParty/Intel/TBB/IntelTBB.Build.cs
+index 6c2da5a09..c15d111fe 100644
+--- a/Engine/Source/ThirdParty/Intel/TBB/IntelTBB.Build.cs
++++ b/Engine/Source/ThirdParty/Intel/TBB/IntelTBB.Build.cs
+@@ -84,7 +84,10 @@ public class IntelTBB : ModuleRules
+ 			bEnableExceptions = false;
+ 			PublicDefinitions.Add("TBB_USE_EXCEPTIONS=0");
+ 
+-			string LibDir = Path.Combine(IntelTBBLibPath, "Linux");
++			// arm64 TBB libs live under an aarch64 subdir; x86 libs sit directly in lib/Linux.
++			string LibDir = (Target.Architecture == UnrealArch.Arm64)
++				? Path.Combine(IntelTBBLibPath, "Linux", Target.Architecture.LinuxName)
++				: Path.Combine(IntelTBBLibPath, "Linux");
+ 			string IntelTBBBinaries = Path.Combine(Target.UEThirdPartyBinariesDirectory, "Intel", "TBB", "Linux");
+ 			
+ 			if (Target.Configuration == UnrealTargetConfiguration.Debug && Target.bDebugBuildsActuallyUseDebugCRT)
+@@ -99,6 +102,8 @@ public class IntelTBB : ModuleRules
+ 				PublicAdditionalLibraries.Add(Path.Combine(LibDir, "libtbb.a"));
+ 				PublicAdditionalLibraries.Add(Path.Combine(LibDir, "libtbbmalloc.a"));
+ 			}
++
++			// (arm64 TBB is rebuilt from source against libc++ to match the engine ABI — no libstdc++ needed.)
+ 		}
+ 	}
+ }
+diff --git a/Engine/Source/ThirdParty/ShaderConductor/ShaderConductor.Build.cs b/Engine/Source/ThirdParty/ShaderConductor/ShaderConductor.Build.cs
+index c52f9e4cf..ee6169b09 100644
+--- a/Engine/Source/ThirdParty/ShaderConductor/ShaderConductor.Build.cs
++++ b/Engine/Source/ThirdParty/ShaderConductor/ShaderConductor.Build.cs
+@@ -29,7 +29,10 @@ public class ShaderConductor : ModuleRules
+ 		}
+ 		else if (Target.Platform == UnrealTargetPlatform.Linux)
+ 		{
+-			string SCBinariesDir = Path.Combine(Target.UEThirdPartyBinariesDirectory, "ShaderConductor", "Linux", "x86_64-unknown-linux-gnu");
++			// Select by architecture so a native aarch64 host build links the arm64 ShaderConductor
++			// (built from Engine/Source/ThirdParty/ShaderConductor via Build-arm64-native) instead of x86_64.
++			string SCArchDir = (Target.Architecture == UnrealArch.Arm64) ? "aarch64-unknown-linux-gnueabi" : "x86_64-unknown-linux-gnu";
++			string SCBinariesDir = Path.Combine(Target.UEThirdPartyBinariesDirectory, "ShaderConductor", "Linux", SCArchDir);
+ 			AddDependency(SCBinariesDir, "libdxcompiler.so");
+ 			AddDependency(SCBinariesDir, "libShaderConductor.so");
+ 		}
+diff --git a/Engine/Source/ThirdParty/ShaderConductor/ShaderConductor/Source/CMakeLists.txt b/Engine/Source/ThirdParty/ShaderConductor/ShaderConductor/Source/CMakeLists.txt
+index 2ccf01bbc..196bcadfd 100644
+--- a/Engine/Source/ThirdParty/ShaderConductor/ShaderConductor/Source/CMakeLists.txt
++++ b/Engine/Source/ThirdParty/ShaderConductor/ShaderConductor/Source/CMakeLists.txt
+@@ -54,7 +54,7 @@ else()
+ 	foreach(flagVar
+ 		CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+ 		set(${flagVar} "${${flagVar}} -W -Wall -Werror -Wno-deprecated")
+-		if(NOT (ANDROID OR IOS))
++		if(NOT (ANDROID OR IOS OR CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64" OR CMAKE_SYSTEM_PROCESSOR MATCHES "arm"))
+ 			set(${flagVar} "${${flagVar}} -msse2")
+ 		endif()
+ 	endforeach()
+@@ -94,6 +94,10 @@ else()
+ 				set(CMAKE_RC_FLAGS "${CMAKE_RC_FLAGS} --target=elf64-x86-64")
+ 			endif()
+ 		endif()
++	elseif(SC_ARCH_NAME STREQUAL "arm64" OR SC_ARCH_NAME STREQUAL "arm")
++		# Native aarch64/arm build: the compiler already targets the host architecture, so no
++		# -m32/-m64/-msse2 (x86-only) flags are needed. Adding -m32 here made clang try to build
++		# 32-bit and emit "unknown platform, assuming -mfloat-abi=soft" under -Werror.
+ 	else()
+ 		foreach(flagVar
+ 			CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
+diff --git a/Engine/Source/ThirdParty/metis/metis.Build.cs b/Engine/Source/ThirdParty/metis/metis.Build.cs
+index b83f3d753..a7e05399e 100644
+--- a/Engine/Source/ThirdParty/metis/metis.Build.cs
++++ b/Engine/Source/ThirdParty/metis/metis.Build.cs
+@@ -36,7 +36,8 @@ public class metis : ModuleRules
+         }
+ 		else if (Target.Platform == UnrealTargetPlatform.Linux)
+         {
+-            string LibFolder = "/libmetis/Linux/x86_64-unknown-linux-gnu";
++            string Arch = (Target.Architecture == UnrealArch.Arm64) ? "aarch64-unknown-linux-gnueabi" : "x86_64-unknown-linux-gnu";
++            string LibFolder = "/libmetis/Linux/" + Arch;
+             if (LibFolder != "")
+             {
+                 bool bDebug = (Target.Configuration == UnrealTargetConfiguration.Debug);// && Target.bDebugBuildsActuallyUseDebugCRT);
+diff --git a/Engine/Source/ThirdParty/nvTextureTools/nvTextureTools-2.0.6/src/src/nvcore/Memory.h b/Engine/Source/ThirdParty/nvTextureTools/nvTextureTools-2.0.6/src/src/nvcore/Memory.h
+index f1bba39b2..c6668af1a 100644
+--- a/Engine/Source/ThirdParty/nvTextureTools/nvTextureTools-2.0.6/src/src/nvcore/Memory.h
++++ b/Engine/Source/ThirdParty/nvTextureTools/nvTextureTools-2.0.6/src/src/nvcore/Memory.h
+@@ -49,7 +49,7 @@ inline void operator delete [] (void * p) throw()
+ 	nv::mem::free(p); 
+ }
+ #else
+-inline void * operator new (size_t size) throw()
++inline void * operator new (size_t size)
+ {
+ 	return nv::mem::malloc(size); 
+ }
+@@ -59,7 +59,7 @@ inline void operator delete (void *p) throw()
+ 	nv::mem::free(p); 
+ }
+ 
+-inline void * operator new [] (size_t size) throw()
++inline void * operator new [] (size_t size)
+ {
+ 	return nv::mem::malloc(size);
+ }
+diff --git a/Engine/Source/ThirdParty/nvTextureTools/nvTextureTools-2.0.6/src/src/nvcore/nvcore.h b/Engine/Source/ThirdParty/nvTextureTools/nvTextureTools-2.0.6/src/src/nvcore/nvcore.h
+index 469f6adb4..51acb2dc8 100644
+--- a/Engine/Source/ThirdParty/nvTextureTools/nvTextureTools-2.0.6/src/src/nvcore/nvcore.h
++++ b/Engine/Source/ThirdParty/nvTextureTools/nvTextureTools-2.0.6/src/src/nvcore/nvcore.h
+@@ -70,6 +70,10 @@
+ #	define NV_CPU_X86 1
+ #elif defined POSH_CPU_PPC
+ #	define NV_CPU_PPC 1
++#elif defined POSH_CPU_AARCH64
++#	define NV_CPU_AARCH64 1
++#elif defined POSH_CPU_STRONGARM
++#	define NV_CPU_ARM 1
+ #else
+ #	error "Unsupported CPU"
+ #endif
+diff --git a/Engine/Source/ThirdParty/nvTextureTools/nvTextureTools-2.0.6/src/src/nvcore/poshlib/posh.h b/Engine/Source/ThirdParty/nvTextureTools/nvTextureTools-2.0.6/src/src/nvcore/poshlib/posh.h
+index 3a7c38190..4460fbc24 100644
+--- a/Engine/Source/ThirdParty/nvTextureTools/nvTextureTools-2.0.6/src/src/nvcore/poshlib/posh.h
++++ b/Engine/Source/ThirdParty/nvTextureTools/nvTextureTools-2.0.6/src/src/nvcore/poshlib/posh.h
+@@ -470,7 +470,11 @@ Metrowerks:
+ #  define POSH_CPU_SPARC 1
+ #endif
+ 
+-#if defined ARM || defined __arm__ || defined _ARM
++#if defined __aarch64__ || defined _M_ARM64 || defined __arm64__
++#  define POSH_CPU_AARCH64 1
++#  define POSH_CPU_STRONGARM 1  /* reuse ARM little-endian path below */
++#  define POSH_CPU_STRING "ARM64"
++#elif defined ARM || defined __arm__ || defined _ARM
+ #  define POSH_CPU_STRONGARM 1
+ #  define POSH_CPU_STRING "ARM"
+ #endif
+diff --git a/Engine/Source/ThirdParty/nvTextureTools/nvTextureTools-2.0.6/src/src/nvimage/ImageIO.cpp b/Engine/Source/ThirdParty/nvTextureTools/nvTextureTools-2.0.6/src/src/nvimage/ImageIO.cpp
+index 0b24600b4..7dec68c05 100644
+--- a/Engine/Source/ThirdParty/nvTextureTools/nvTextureTools-2.0.6/src/src/nvimage/ImageIO.cpp
++++ b/Engine/Source/ThirdParty/nvTextureTools/nvTextureTools-2.0.6/src/src/nvimage/ImageIO.cpp
+@@ -135,7 +135,7 @@ FloatImage * nv::ImageIO::loadFloat(const char * fileName)
+ 	StdInputStream stream(fileName);
+ 	
+ 	if (stream.isError()) {
+-		return false;
++		return NULL;
+ 	}
+ 	
+ 	return loadFloat(fileName, stream);
+@@ -233,7 +233,7 @@ Image * nv::ImageIO::loadTGA(Stream & s)
+ 		case TGA_TYPE_INDEXED:
+ 			if( tga.colormap_type!=1 || tga.colormap_size!=24 || tga.colormap_length>256 ) {
+ 				nvDebug( "*** ImageIO::loadTGA: Error, only 24bit paletted images are supported.\n" );
+-				return false;
++				return NULL;
+ 			}
+ 			pal = true;
+ 			break;
+@@ -254,7 +254,7 @@ Image * nv::ImageIO::loadTGA(Stream & s)
+ 
+ 		default:
+ 			nvDebug( "*** ImageIO::loadTGA: Error, unsupported image type.\n" );
+-			return false;
++			return NULL;
+ 	}
+ 
+ 	const uint pixel_size = (tga.pixel_size/8);
+diff --git a/Engine/Source/UnrealEditor.Target.cs b/Engine/Source/UnrealEditor.Target.cs
+index 5f7cb7bc4..96b9f584f 100644
+--- a/Engine/Source/UnrealEditor.Target.cs
++++ b/Engine/Source/UnrealEditor.Target.cs
+@@ -12,5 +12,30 @@ public class UnrealEditorTarget : TargetRules
+ 		BuildEnvironment = TargetBuildEnvironment.Shared;
+ 		bBuildAllModules = true;
+ 		ExtraModuleNames.Add("UnrealGame");
++
++		// On aarch64 hosts, "build all modules" pulls in many optional plugins whose third-party
++		// dependencies are x86-only or proprietary (USD, various importers) and not yet ported.
++		// Build only what the editor actually needs so it can boot; individual plugins can be
++		// re-enabled once their deps are ported. Gated by env var (target rules cannot reference
++		// RuntimeInformation to detect the host arch directly).
++		if (System.Environment.GetEnvironmentVariable("UE_ARM64_MINIMAL_EDITOR") == "1")
++		{
++			// Build all modules so ESSENTIAL engine modules (target-platform modules, etc.) are built with
++			// correct manifests/paths — a minimal build silently drops them and the editor asserts at
++			// runtime. USD is disabled on arm64 in UnrealUSDWrapper.Build.cs (EnableUsdSdk), so the USD
++			// plugins compile with the SDK unavailable instead of throwing.
++			bBuildAllModules = true;
++
++			// CEF3 (Chromium Embedded Framework) ships x86_64-only prebuilt binaries and cannot be
++			// rebuilt for arm64 here; disabling it compiles the WebBrowser modules' non-CEF path.
++			bCompileCEF3 = false;
++			// (ISPC is disabled for aarch64 in UEBuildLinux.SetUpPlatformEnvironment — bCompileISPC has
++			// RequiresUniqueBuildEnvironment so it can't be overridden here in a Shared-environment target.)
++
++			// Plugins whose third-party libraries are x86-only / proprietary and not yet ported.
++			DisablePlugins.Add("PerforceSourceControl");    // x86 P4 API
++			DisablePlugins.Add("ChangelistReview");         // x86 P4 API
++			DisablePlugins.Add("KDevelopSourceCodeAccess"); // x86 P4 API
++		}
+ 	}
+ }

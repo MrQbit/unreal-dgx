@@ -1,0 +1,8 @@
+# This repo holds patches + docs, not the engine tree or build outputs.
+*.o
+*.a
+*.so
+*.so.*
+Binaries/
+Intermediate/
+.claude/

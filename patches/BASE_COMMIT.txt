@@ -1,0 +1,2 @@
+UE base commit: 847de5e2553adeb4d3498953604d0b0abe669780  (branch 5.4)
+847de5e25 Localization Automation using CL 36077221
