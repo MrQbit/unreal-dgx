@@ -88,6 +88,21 @@ index a3fbcba0b..3d61bc46d 100644
  ; Configure the shared cache that is accessed after local.
  Shared=(Type=FileSystem, UnusedFileAge=10, FoldersToClean=10, ConsiderSlowAt=70, Path=?EpicDDC, EnvPathOverride=UE-SharedDataCachePath, EditorOverrideSetting=SharedDerivedDataCache, CommandLineOverride=SharedDataCachePath)
  ; Configure the cloud cache that is accessed after shared.
+diff --git a/Engine/Config/Linux/DataDrivenPlatformInfo.ini b/Engine/Config/Linux/DataDrivenPlatformInfo.ini
+index 6b4ea25f8..8e5f184f0 100644
+--- a/Engine/Config/Linux/DataDrivenPlatformInfo.ini
++++ b/Engine/Config/Linux/DataDrivenPlatformInfo.ini
+@@ -19,8 +19,10 @@ TutorialPath=SharingAndReleasing/Linux
+ Windows:bIsEnabled=true
+ Mac:bIsEnabled=false
+ Linux:bIsEnabled=true
++LinuxArm64:bIsEnabled=true
+ Windows:bUsesHostCompiler=false
+ Linux:bUsesHostCompiler=true
++LinuxArm64:bUsesHostCompiler=true
+ bUATClosesAfterLaunch=true
+ PlatformGroupName=Desktop
+ PlatformSubMenu=Linux
 diff --git a/Engine/Plugins/Compression/OodleNetwork/Source/OodleNetworkHandlerComponent.Build.cs b/Engine/Plugins/Compression/OodleNetwork/Source/OodleNetworkHandlerComponent.Build.cs
 index 701caaa07..baca27e02 100644
 --- a/Engine/Plugins/Compression/OodleNetwork/Source/OodleNetworkHandlerComponent.Build.cs
@@ -728,6 +743,18 @@ index b49eba732..2f54567a7 100644
  		};
  	};
  
+diff --git a/Engine/Source/Runtime/Online/XMPP/XMPP.Build.cs b/Engine/Source/Runtime/Online/XMPP/XMPP.Build.cs
+index 39b42e3e2..74d2370c1 100644
+--- a/Engine/Source/Runtime/Online/XMPP/XMPP.Build.cs
++++ b/Engine/Source/Runtime/Online/XMPP/XMPP.Build.cs
+@@ -48,6 +48,7 @@ public class XMPP : ModuleRules
+ 		else if (Target.IsInPlatformGroup(UnrealPlatformGroup.Unix))
+ 		{
+ 			AddEngineThirdPartyPrivateStaticDependencies(Target, "libcurl");
++				PublicSystemLibraries.Add("resolv"); // libstrophe DNS SRV needs res_query
+ 		}
+ 	}
+ }
 diff --git a/Engine/Source/Runtime/OodleDataCompression/OodleDataCompression.Build.cs b/Engine/Source/Runtime/OodleDataCompression/OodleDataCompression.Build.cs
 index 668da92ec..a8d36d281 100644
 --- a/Engine/Source/Runtime/OodleDataCompression/OodleDataCompression.Build.cs
@@ -1020,10 +1047,10 @@ index 0b24600b4..7dec68c05 100644
  
  	const uint pixel_size = (tga.pixel_size/8);
 diff --git a/Engine/Source/UnrealEditor.Target.cs b/Engine/Source/UnrealEditor.Target.cs
-index 5f7cb7bc4..e920356e4 100644
+index 5f7cb7bc4..917a22bfc 100644
 --- a/Engine/Source/UnrealEditor.Target.cs
 +++ b/Engine/Source/UnrealEditor.Target.cs
-@@ -12,5 +12,35 @@ public class UnrealEditorTarget : TargetRules
+@@ -12,5 +12,46 @@ public class UnrealEditorTarget : TargetRules
  		BuildEnvironment = TargetBuildEnvironment.Shared;
  		bBuildAllModules = true;
  		ExtraModuleNames.Add("UnrealGame");
@@ -1035,17 +1062,13 @@ index 5f7cb7bc4..e920356e4 100644
 +		// RuntimeInformation to detect the host arch directly).
 +		if (System.Environment.GetEnvironmentVariable("UE_ARM64_MINIMAL_EDITOR") == "1")
 +		{
-+			// Minimal build — the furthest known-working state: the editor LINKS and BOOTS (loads engine,
-+			// mounts plugins, compiles Vulkan shaders, starts Asset Registry), then hits the documented
-+			// `RunningPlatform` assert (no Linux target-platform registers). See docs/STATUS.md.
-+			//
-+			// NOTE: `bBuildAllModules = true` (the normal editor path that registers all target-platform
-+			// modules) does NOT converge here because it drags in optional plugins with x86-only libs
-+			// (OpenCV, EOS, Steam, OpenXR, WebRTC/PixelStreaming, WebM/VPx, Bink, NNE/ONNX, msquic, ...),
-+			// and `DisablePlugins` is a SOFT disable that loses to hard plugin dependencies — so those
-+			// plugins stay enabled and fail to link. Reaching a full build needs either stubbing those
-+			// ~10 x86 libs, or fixing the target-platform module discovery under this minimal build.
-+			bBuildAllModules = false;
++			// Full build so ALL target-platform modules are registered (fixes the RunningPlatform assert
++			// that a minimal build hits). This pulls in optional plugins with x86-only third-party libs
++			// (OpenCV, EOS, Steam, OpenXR, WebRTC, libvpx, Bink, ONNX/IREE, msquic, protobuf). Since
++			// DisablePlugins is soft (loses to hard deps), those libs are instead replaced in-place with
++			// aarch64 no-op STUB libraries (scripts/stub_x86_lib.sh) so everything links. USD is disabled
++			// on arm64 (UnrealUSDWrapper.Build.cs EnableUsdSdk) and compiles without the SDK.
++			bBuildAllModules = true;
 +
 +			// CEF3 (Chromium Embedded Framework) ships x86_64-only prebuilt binaries and cannot be
 +			// rebuilt for arm64 here; disabling it compiles the WebBrowser modules' non-CEF path.
@@ -1056,6 +1079,21 @@ index 5f7cb7bc4..e920356e4 100644
 +			DisablePlugins.Add("PerforceSourceControl");    // x86 P4 API
 +			DisablePlugins.Add("ChangelistReview");         // x86 P4 API
 +			DisablePlugins.Add("KDevelopSourceCodeAccess"); // x86 P4 API
++
++			// Optional plugins that can't build on arm64: their SOURCE needs x86-only headers/intrinsics
++			// (WebRTC/msquic/SSE2), or their x86 libs can't be cleanly stubbed (C++ std:: API →
++			// libstdc++-vs-libc++ mangling mismatch, or stacked stubs collide). Because DisablePlugins is
++			// soft (loses to hard deps), this is the FULL module-level dependent closure of the roots
++			// {NNERuntimeORT/IREE, PixelStreaming, MovieRenderPipeline, nDisplay, BlackmagicMedia,
++			// QuicMessaging} — computed so nothing hard-references a disabled plugin. All are optional
++			// (media codecs, virtual production, NN runtimes, movie render pipeline).
++			foreach (string P in new string[] {
++				"AppleProResMedia", "Avalanche", "AvidDNxMedia", "BinkMedia", "BlackmagicMedia",
++				"CinematicPrestreaming", "DMXDisplayCluster", "LiveLinkOverNDisplay", "MoviePipelineMaskRenderPass",
++				"MovieRenderPipeline", "NNERuntimeIREE", "NNERuntimeORT", "NNERuntimeRDG", "NiagaraMRQ",
++				"PixelStreaming", "PixelStreamingPlayer", "PixelCapture", "QuicMessaging", "RenderGrid",
++				"RivermaxSync", "TextureShare", "VertexDeltaModel", "VirtualCameraCore", "nDisplay",
++			}) { DisablePlugins.Add(P); }
 +		}
  	}
  }

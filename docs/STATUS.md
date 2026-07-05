@@ -16,7 +16,40 @@ _Snapshot of milestones, the current blocker, and remaining work._
 10. **Editor boots natively** — loads engine, mounts plugins, compiles Vulkan shaders, starts Asset Registry
 11. **Vulkan confirmed on the GB10 Blackwell GPU** — Vulkan 1.4, 16 graphics queues; UE detects the NVIDIA aarch64 driver + loads Vulkan shader formats
 
-## Current blocker — `RunningPlatform` assert (deep, under investigation)
+## ✅ SOLVED: `RunningPlatform` assert — root cause was a DDPI host-key gap
+
+**The editor now boots past the assert, registers the Linux target platform, and compiles Blueprints.**
+
+Root cause: `Engine/Config/Linux/DataDrivenPlatformInfo.ini` gates `bIsEnabled` by **host** platform
+(`Windows:bIsEnabled=true`, `Linux:bIsEnabled=true`, `Mac:bIsEnabled=false`). On arm64,
+`FLinuxPlatformProperties::IniPlatformName()` returns **`"LinuxArm64"`** (not `"Linux"`) —
+`IS_ARM64 ? "LinuxArm64" : "Linux"` — so none of those host keys matched and the Linux target
+platform was never enabled → `GetRunningTargetPlatform()` returned null. **Fix:** add
+`LinuxArm64:bIsEnabled=true` + `LinuxArm64:bUsesHostCompiler=true` to the Linux DDPI. Now
+`Loaded TargetPlatform 'Linux' / 'LinuxEditor' / 'LinuxServer' / 'LinuxClient'` and the assert is gone.
+
+This required the full-module build (`bBuildAllModules=true`) so `LinuxTargetPlatform` is actually
+built + manifested, achieved by **stubbing the x86-only plugin libs** (see below) rather than
+disabling (DisablePlugins is soft). Path to the full link:
+- **12 x86 libs stubbed in-place** with aarch64 no-op exports (`scripts/stub_x86_lib.sh`): OpenCV,
+  EOSSDK, steam_api (×2 paths), OpenXR loader, IREE (libireert/libflatcc), protobuf-lite, libproj,
+  onnx/onnx_proto, coremod, libvpx, mpcdi — symbols extracted from each x86 lib, `@@VERSION` tags
+  stripped, linker-reserved symbols excluded.
+- **23-plugin closure disabled** (`UnrealEditor.Target.cs`) — the module-level dependent closure of
+  the plugins that can't build on arm64 (WebRTC/PixelStreaming, msquic/QuicMessaging, BlackmagicMedia
+  SSE2, MovieRenderPipeline, nDisplay/mpcdi ABI, NNE-ORT/IREE) — computed so nothing hard-references
+  a disabled plugin.
+- **XMPP `__res_query` shim**: glibc ≥2.34 dropped the default-version `__res_query`; added a
+  one-function forwarder (`res_compat.o`) into the arm64 `libstrophe.a`.
+
+### New blocker (much later): package-load crash
+
+Signal 11 in `FLinkerLoad::CreateLinker` / `GetPackageLinker` (CoreUObject) while
+`CompileAllBlueprints` loads `/Engine/Tutorial/.../TutorialCharacter`. Note `CompileAllBlueprints` is
+a torture test over *every* asset; the editor GUI loads a different set, so this may not block a GUI
+boot. Under investigation.
+
+<details><summary>Historical: the original RunningPlatform investigation</summary>
 
 Runtime assert `check(RunningPlatform)` at `StaticMesh.cpp:5554` — `GetRunningTargetPlatform()`
 returns null: **no Linux target platform registers**. Findings:
@@ -59,6 +92,8 @@ So the two real paths are:
 
 The committed `UnrealEditor.Target.cs` is left in the minimal (`bBuildAllModules=false`) state — the
 furthest point where the editor links and boots.
+
+</details>
 
 ## Remaining work
 
