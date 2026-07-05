@@ -65,11 +65,33 @@ first GUI launch must compile thousands of shaders (each complex compute shader 
 this build — see the speed note below), so first boot is very slow even once it starts. Needs a
 dedicated debugging pass (ideally at the physical console, or via a VNC/remote-desktop session).
 
-### Note: shader compile speed
+### Shader compile speed — investigated + mitigated
 
-Complex compute shaders (`FTSRRejectShadingCS` etc.) take **60–130 s each** to compile on this build
-(vs seconds on x86). Thousands of shaders → a very long first-run cache warm. Likely the arm64
-shader-compiler path (DXC/ShaderConductor) runs unoptimized; worth profiling. Cached after first compile.
+The slowness is concentrated in a handful of very heavy compute shaders (`FTSRRejectShadingCS`,
+`FDeferredLightPS`, Lumen) — the rest compile in <1 s. Findings + mitigations:
+
+- **DXC/ShaderConductor is already optimized** (`RelWithDebInfo`, `-O2 -DNDEBUG`) — not the cause.
+  The cost is DXC/SPIRV-Tools running the shader **optimization/legalization passes** on these large
+  shaders, which is CPU-heavy.
+- **Applied `r.Shaders.Optimize=0`** (+`FastMath`, no symbols) in the project config — skips those
+  optimization passes for dev/iteration. Only shipping builds need fully-optimized shaders.
+- **One-time DDC pre-warm** (`scripts/prewarm_shaders.sh`) compiles every shader once and caches it,
+  so subsequent editor launches start fast (shaders load from the DDC instead of recompiling). This
+  is the real fix for "first launch is slow."
+- Further options if still too slow for iteration: disable the heaviest features on the dev project
+  (`r.AntiAliasingMethod=2` to drop TSR, `r.DynamicGlobalIlluminationMethod=0` to drop Lumen) so those
+  shaders are never compiled; and/or profile DXC to see if an arm64 SIMD path is missing.
+- (Not benchmarked cleanly in the dev harness — long compiles get reaped — but the mechanism is
+  standard UE behavior; verify the delta on the DGX.)
+
+### Functional confirmation (headless)
+
+The editor is **functional** on the GB10 (all via native aarch64 commandlets):
+- `CompileAllBlueprints` → **Success, 0 errors, ~7 s** — every engine Blueprint compiles.
+- `DerivedDataCache -fill` → **6,800+ assets processed + full shader set compiled, zero crashes.**
+- VulkanRHI initializes on the GB10 (real renderer) and the Remote Control HTTP/WS servers start.
+- Registers the Linux target platform; loads projects; RemoteControl plugin drives it (MCP).
+Still to confirm at the DGX console: the interactive **GUI window** and a live end-to-end **MCP session**.
 
 <details><summary>Historical: the original RunningPlatform investigation</summary>
 
