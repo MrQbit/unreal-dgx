@@ -42,12 +42,34 @@ disabling (DisablePlugins is soft). Path to the full link:
 - **XMPP `__res_query` shim**: glibc ≥2.34 dropped the default-version `__res_query`; added a
   one-function forwarder (`res_compat.o`) into the arm64 `libstrophe.a`.
 
-### New blocker (much later): package-load crash
+### Editor is functionally working (via commandlet)
 
-Signal 11 in `FLinkerLoad::CreateLinker` / `GetPackageLinker` (CoreUObject) while
-`CompileAllBlueprints` loads `/Engine/Tutorial/.../TutorialCharacter`. Note `CompileAllBlueprints` is
-a torture test over *every* asset; the editor GUI loads a different set, so this may not block a GUI
-boot. Under investigation.
+The editor runs the full engine natively and **stably**: a `DerivedDataCache -fill` commandlet
+processed **6,800+ assets and compiled the full shader set** (Lumen/TSR/deferred lighting/sky/water)
+with **zero crashes**. `CompileAllBlueprints` compiles Blueprints (one tutorial asset,
+`TutorialCharacter`, crashes in the blueprint-*compile* path — `FLinkerLoad::CreateLinker` — but the
+same asset loads fine under the DDC commandlet, so it's compile-path-specific, not general loading).
+
+### Remaining: interactive GUI launch
+
+Additional fixes landed for the GUI path:
+- `LinuxPlatformProcess.cpp` `GetBinariesSubdirectory()` → `"Linux"` (we build to `Binaries/Linux`,
+  not `Binaries/LinuxArm64`), so binary/module/receipt path resolution is consistent.
+- `LaunchEngineLoop.cpp` `LaunchCorrectEditorExecutable()` → never relaunch on this build (the stock
+  check computes a `LinuxArm64` path we don't produce and would relaunch a non-existent binary).
+
+The GUI (`UnrealEditor` with real Vulkan RHI on the X11 display) does not yet produce an observable
+running window in headless SSH conditions — the process output couldn't be cleanly captured this
+session (mix of the relaunch behavior, shader-compile time, and display/session issues). Note the
+first GUI launch must compile thousands of shaders (each complex compute shader takes 60–130 s on
+this build — see the speed note below), so first boot is very slow even once it starts. Needs a
+dedicated debugging pass (ideally at the physical console, or via a VNC/remote-desktop session).
+
+### Note: shader compile speed
+
+Complex compute shaders (`FTSRRejectShadingCS` etc.) take **60–130 s each** to compile on this build
+(vs seconds on x86). Thousands of shaders → a very long first-run cache warm. Likely the arm64
+shader-compiler path (DXC/ShaderConductor) runs unoptimized; worth profiling. Cached after first compile.
 
 <details><summary>Historical: the original RunningPlatform investigation</summary>
 

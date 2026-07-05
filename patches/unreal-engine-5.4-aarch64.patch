@@ -708,6 +708,24 @@ index fab754dca..368c7c5a6 100644
  			}
  
  			if (CompileEnvironment.bPGOOptimize != LinkEnvironment.bPGOOptimize)
+diff --git a/Engine/Source/Runtime/Core/Private/Linux/LinuxPlatformProcess.cpp b/Engine/Source/Runtime/Core/Private/Linux/LinuxPlatformProcess.cpp
+index 2e9d3c871..5eb5b2d20 100644
+--- a/Engine/Source/Runtime/Core/Private/Linux/LinuxPlatformProcess.cpp
++++ b/Engine/Source/Runtime/Core/Private/Linux/LinuxPlatformProcess.cpp
+@@ -42,10 +42,8 @@ const TCHAR* FLinuxPlatformProcess::BaseDir()
+ 
+ const TCHAR* FLinuxPlatformProcess::GetBinariesSubdirectory()
+ {
+-	if (PLATFORM_CPU_ARM_FAMILY)
+-	{
+-		return TEXT("LinuxArm64");
+-	}
+-
++	// This native aarch64 editor is built into Engine/Binaries/Linux (not .../LinuxArm64). Report
++	// "Linux" so binary/receipt/module path resolution matches where we actually put the binaries,
++	// otherwise the editor tries to relaunch a non-existent LinuxArm64 executable.
+ 	return TEXT("Linux");
+ }
 diff --git a/Engine/Source/Runtime/Core/Public/Unix/UnixPlatform.h b/Engine/Source/Runtime/Core/Public/Unix/UnixPlatform.h
 index f35fa0666..dd234c846 100644
 --- a/Engine/Source/Runtime/Core/Public/Unix/UnixPlatform.h
@@ -743,6 +761,22 @@ index b49eba732..2f54567a7 100644
  		};
  	};
  
+diff --git a/Engine/Source/Runtime/Launch/Private/LaunchEngineLoop.cpp b/Engine/Source/Runtime/Launch/Private/LaunchEngineLoop.cpp
+index fc16e16f6..b03b555f1 100644
+--- a/Engine/Source/Runtime/Launch/Private/LaunchEngineLoop.cpp
++++ b/Engine/Source/Runtime/Launch/Private/LaunchEngineLoop.cpp
+@@ -6371,6 +6371,11 @@ void CleanUpPath(FString& InPath)
+ 
+ bool LaunchCorrectEditorExecutable(const FString& EditorTargetFileName)
+ {
++	// aarch64/DGX: this editor is built and run directly from Engine/Binaries/Linux. The stock check
++	// computes a LinuxArm64 launch path we don't produce and would relaunch into a non-existent binary
++	// (an infinite loop). We are always the correct executable here — never relaunch. [DGX_NORELAUNCH]
++	return false;
++
+ 	// Don't allow relaunching the executable if we're running some unattended scripted process.
+ 	if(FApp::IsUnattended())
+ 	{
 diff --git a/Engine/Source/Runtime/Online/XMPP/XMPP.Build.cs b/Engine/Source/Runtime/Online/XMPP/XMPP.Build.cs
 index 39b42e3e2..74d2370c1 100644
 --- a/Engine/Source/Runtime/Online/XMPP/XMPP.Build.cs
