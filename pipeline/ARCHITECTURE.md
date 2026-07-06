@@ -31,6 +31,30 @@ the assets* and *runs the engine*.
  └─────────────────────────────────────────────────────────────────────────┘
 ```
 
+## Workflow — how you actually use it
+
+**The service model (primary).** Start one long-lived headless editor + Remote Control on the DGX and
+leave it running; everything after is conversation.
+
+1. On the DGX, once:  `scripts/start_forge_service.sh`  (or `systemctl enable --now forge-editor`).
+   Editor comes up with the RC API on `:30010`. Check: `scripts/forge_status.sh`.
+2. In chat with Claude: refine a spec together → say **"build it"**. Claude generates the assets
+   locally (Blender/SDXL/MusicGen), imports + assembles them into the live editor over Remote Control,
+   and packages for SteamOS. No per-spec script — the service is the only thing you start.
+
+```
+  you  ⇄  Claude (chat: shape spec, "build it")
+                     │  generate assets locally + drive over Remote Control
+                     ▼
+        [ persistent editor service on the DGX  :30010 ]  ──►  SteamOS package
+```
+
+**Testing shortcut (not the workflow).** `scripts/forge_pong.sh <proj> <spec>` launches its own editor
+and runs one spec end-to-end, then exits — a self-contained smoke test only.
+
+The two DGX-console dependencies today: start the service once, and run the long SteamOS cook. Both
+are one-time/occasional; the build-a-game loop itself is just chat.
+
 ## Components (what runs where)
 
 | Stage | Tool | Status on the DGX |

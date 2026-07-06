@@ -1,7 +1,13 @@
 #!/bin/bash
-# Turnkey: build a game from a spec end-to-end on the DGX. Launches the headless editor + Remote
-# Control, runs GameForge (generate assets -> import -> assemble Blueprints+level), packages x64/SteamOS.
-#   ./forge_pong.sh [Project.uproject] [spec.yaml]
+# TESTING-ONLY one-shot: launches its OWN editor, runs GameForge end-to-end for one spec, then exits.
+# Handy for a self-contained smoke test on the console. NOT the intended workflow.
+#
+# The real workflow is the SERVICE model: start the editor once with scripts/start_forge_service.sh
+# (or the forge-editor systemd unit), leave it running, then just chat with Claude — "refine this
+# spec", "build it" — and Claude drives generate/import/assemble/package over Remote Control. No
+# per-spec script. See pipeline/ARCHITECTURE.md > Workflow.
+#
+#   ./forge_pong.sh [Project.uproject] [spec.yaml]     # testing only
 set -u
 PIPE=/home/mrqbit/Downloads/unreal-dgx/pipeline
 PROJECT="${1:-$HOME/DGXGame/DGXGame.uproject}"

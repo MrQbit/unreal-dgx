@@ -1,0 +1,21 @@
+# GameForge editor service — install with:
+#   sudo cp forge-editor.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now forge-editor
+# Then check:  systemctl status forge-editor ; curl -s http://127.0.0.1:30010/remote/info
+[Unit]
+Description=GameForge headless Unreal Editor (Remote Control on :30010)
+After=network.target
+
+[Service]
+Type=simple
+User=mrqbit
+Environment=DOTNET_ROOT=/home/mrqbit/.dotnet
+Environment=UE_ROOT=/home/mrqbit/UnrealEngine
+ExecStart=/home/mrqbit/Downloads/unreal-dgx/scripts/start_forge_service.sh
+Restart=on-failure
+RestartSec=15
+# first boot compiles shaders; give it room before failure counts
+TimeoutStartSec=0
+
+[Install]
+WantedBy=default.target
