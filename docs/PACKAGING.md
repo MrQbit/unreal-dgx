@@ -20,7 +20,7 @@ compiler** (to cook shaders). On this build:
 | Target | Cook (assets+shaders) | Build game binary | Verdict |
 |---|---|---|---|
 | **Linux arm64** (aarch64) | ✅ Vulkan/GL, native | ✅ native (this machine) | **YES — fully works.** Runs on the DGX and other ARM64 Linux. |
-| **Linux x86_64** | ✅ Vulkan/GL | ⚠️ needs the x86_64 Linux cross-toolchain (clang + sysroot) | **Yes, with toolchain setup.** |
+| **Linux x86_64 (incl. SteamOS)** | ✅ Vulkan/GL | ✅ cross-toolchain **set up & proven** (clang→x86_64 ELF w/ libc++); UBT arch-targeting patch pending | **Yes — see `STEAMOS_X86_64.md`.** |
 | **Android** | ✅ Vulkan/GLES | ⚠️ needs the Android NDK (arm64 Linux host) | **Yes, with the NDK installed.** |
 | **Windows** | ❌ no D3D shader format on Linux | ❌ needs MSVC/clang-cl + Windows SDK | **No** from here — package on Windows. |
 | **macOS / iOS / tvOS** | ❌ Metal compiler is macOS-only | ❌ Mach-O + codesign need a Mac | **No** from here — package on a Mac. |
