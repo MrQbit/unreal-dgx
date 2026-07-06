@@ -157,6 +157,42 @@ index 85bf01ad0..e8c8c3034 100644
  	"MarketplaceURL": "",
  	"SupportURL": "",
  	"CanContainContent": false,
+diff --git a/Engine/Plugins/Editor/ContentBrowser/ContentBrowserFileDataSource/Source/ContentBrowserFileDataSource/Private/ContentBrowserFileDataSource.cpp b/Engine/Plugins/Editor/ContentBrowser/ContentBrowserFileDataSource/Source/ContentBrowserFileDataSource/Private/ContentBrowserFileDataSource.cpp
+index 499ea3800..d538b265b 100644
+--- a/Engine/Plugins/Editor/ContentBrowser/ContentBrowserFileDataSource/Source/ContentBrowserFileDataSource/Private/ContentBrowserFileDataSource.cpp
++++ b/Engine/Plugins/Editor/ContentBrowser/ContentBrowserFileDataSource/Source/ContentBrowserFileDataSource/Private/ContentBrowserFileDataSource.cpp
+@@ -401,16 +401,25 @@ void UContentBrowserFileDataSource::Initialize(const ContentBrowserFileData::FFi
+ 
+ void UContentBrowserFileDataSource::Shutdown()
+ {
+-	// Unregister asset type actions
+-	if (FAssetToolsModule* AssetToolsModule = FModuleManager::GetModulePtr<FAssetToolsModule>("AssetTools"))
++	// During engine exit, GC can collect the AssetTools singleton (UAssetToolsImpl) BEFORE this data
++	// source's BeginDestroy runs, while the AssetTools *module* is still loaded. GetModulePtr then
++	// succeeds but Get() returns a dangling impl, and UnregisterAssetTypeActions dereferences it
++	// (observed as SIGSEGV @0x30 inside Shutdown during exit-GC on the aarch64 build). The
++	// unregistration is moot at exit (everything is being torn down), so skip subsystem cleanup then.
++	if (!IsEngineExitRequested())
+ 	{
+-		for (const TSharedRef<IAssetTypeActions>& Action : RegisteredAssetTypeActions)
++		// Unregister asset type actions
++		if (FAssetToolsModule* AssetToolsModule = FModuleManager::GetModulePtr<FAssetToolsModule>("AssetTools"))
+ 		{
+-			AssetToolsModule->Get().UnregisterAssetTypeActions(Action);
++			for (const TSharedRef<IAssetTypeActions>& Action : RegisteredAssetTypeActions)
++			{
++				AssetToolsModule->Get().UnregisterAssetTypeActions(Action);
++			}
+ 		}
+-	}
+ 
+-	UToolMenus::UnregisterOwner(GetFName());
++		UToolMenus::UnregisterOwner(GetFName());
++	}
++	RegisteredAssetTypeActions.Reset();
+ 
+ 	if (BackgroundDiscovery)
+ 	{
 diff --git a/Engine/Plugins/Editor/MacGraphicsSwitching/MacGraphicsSwitching.uplugin b/Engine/Plugins/Editor/MacGraphicsSwitching/MacGraphicsSwitching.uplugin
 index 94b74d7b9..701ca0763 100644
 --- a/Engine/Plugins/Editor/MacGraphicsSwitching/MacGraphicsSwitching.uplugin
