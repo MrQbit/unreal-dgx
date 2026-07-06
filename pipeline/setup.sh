@@ -26,9 +26,9 @@ VIRTUAL_ENV="$VENV" uv pip install --index-url https://download.pytorch.org/whl/
 echo "== 4. Image generation (diffusers: SDXL / FLUX) =="
 VIRTUAL_ENV="$VENV" uv pip install diffusers transformers accelerate safetensors sentencepiece pillow
 
-echo "== 5. Audio generation (music/SFX) + voice (Piper TTS) =="
-VIRTUAL_ENV="$VENV" uv pip install audiocraft soundfile      # MusicGen for music/SFX
-VIRTUAL_ENV="$VENV" uv pip install piper-tts                 # lightweight local TTS
+echo "== 5. Audio generation (music/SFX via transformers MusicGen) + voice (Piper TTS) =="
+# MusicGen runs through the already-installed transformers (no AudioCraft version pins). Verified on GB10.
+VIRTUAL_ENV="$VENV" uv pip install soundfile piper-tts
 
 echo "== 6. Local LLM (design/dialogue) — ollama =="
 command -v ollama >/dev/null || (curl -fsSL https://ollama.com/install.sh | sh)

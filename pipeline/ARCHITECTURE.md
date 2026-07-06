@@ -39,8 +39,8 @@ the assets* and *runs the engine*.
 | LLM (design/dialogue) | **ollama** `nemotron-3-super:120b` | ✅ installed (86 GB) |
 | 3D meshes | **Blender 4.0.2** headless (`bpy`) → glTF | ✅ installed (arm64) + validated |
 | Textures/sprites | **diffusers** SDXL-Turbo/FLUX on CUDA | ✅ **verified** — torch 2.11+cu128 sees GB10 (cap 12.1); SDXL-Turbo generated a 512² PNG |
-| Music/SFX | **AudioCraft / MusicGen** | ⏳ `setup.sh` (torch stack already proven) |
-| Voice | **Piper TTS** (light, arm64) | ⏳ `setup.sh` |
+| Music/SFX | **MusicGen** (via transformers) | ✅ **verified** — generated a 5.9 s 32 kHz WAV on the GB10 |
+| Voice | **Piper TTS** (light, arm64) | ✅ **verified** — synthesized a 3.3 s speech WAV |
 | Import → UE | **DGXMCPTools** `ImportAsset` (glTF/PNG/WAV via Interchange/AssetTools) | ✅ built + reflected |
 | Assembly | **DGXMCPTools** `bp_*` (Blueprint graphs, levels, spawn/config) over Remote Control MCP | ✅ built |
 | Package (SteamOS) | UBT x64 cross-build + cook (`-Architecture=x64`) | ✅ binary proven; cook = long |
