@@ -55,6 +55,17 @@ public:
 	UFUNCTION(BlueprintCallable, Category = "DGX|Blueprint")
 	static FString AddEventNode(const FString& BlueprintPath, const FString& EventName, float NodePosX, float NodePosY);
 
+	/** Add an input-axis event node (legacy input mapping, e.g. "MoveRight") to the event graph.
+	 *  Its "then" exec + float "Axis Value" pin drive player-controlled behaviours. Returns the GUID. */
+	UFUNCTION(BlueprintCallable, Category = "DGX|Blueprint")
+	static FString AddInputAxisEvent(const FString& BlueprintPath, const FString& AxisName, float NodePosX, float NodePosY);
+
+	/** Set a literal default value on a node pin (for constants like a rotation amount or a string).
+	 *  Value is the import string ("(Pitch=0,Yaw=90,Roll=0)", "5.0", "Hello"). GraphName "" = event graph. */
+	UFUNCTION(BlueprintCallable, Category = "DGX|Blueprint")
+	static bool SetPinDefault(const FString& BlueprintPath, const FString& GraphName,
+		const FString& NodeGuid, const FString& PinName, const FString& Value);
+
 	/** Add a variable get/set node for a member variable. bIsSetter=true adds a Set node.
 	 *  Returns the node's GUID string or "" on failure. */
 	UFUNCTION(BlueprintCallable, Category = "DGX|Blueprint")

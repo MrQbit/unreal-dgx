@@ -39,6 +39,55 @@ def bp_compile(path):               return rc_call("CompileBlueprint", {"Bluepri
 def bp_save(path):                  return rc_call("SaveAsset", {"AssetPath": path})
 def spawn(cls, loc):                return rc_call("SpawnActor", {"ClassPath": cls, "Location": loc, "Rotation": {"Pitch":0,"Yaw":0,"Roll":0}})
 
+# node/graph primitives (graph "" = event graph)
+def bp_component(p, cls, name):      return rc_call("AddComponent", {"BlueprintPath": p, "ComponentClassPath": cls, "ComponentName": name})
+def bp_event(p, name, x, y):         return rc_call("AddEventNode", {"BlueprintPath": p, "EventName": name, "NodePosX": x, "NodePosY": y})
+def bp_input_axis(p, axis, x, y):    return rc_call("AddInputAxisEvent", {"BlueprintPath": p, "AxisName": axis, "NodePosX": x, "NodePosY": y})
+def bp_call(p, cls, fn, x, y):       return rc_call("AddCallFunctionNode", {"BlueprintPath": p, "GraphName": "", "TargetClassPath": cls, "FunctionName": fn, "NodePosX": x, "NodePosY": y})
+def bp_connect(p, a, pa, b, pb):     return rc_call("ConnectNodes", {"BlueprintPath": p, "GraphName": "", "NodeAGuid": a, "PinAName": pa, "NodeBGuid": b, "PinBName": pb})
+def bp_pin(p, node, pin, val):       return rc_call("SetPinDefault", {"BlueprintPath": p, "GraphName": "", "NodeGuid": node, "PinName": pin, "Value": val})
+
+ACTOR = "/Script/Engine.Actor"
+KSL   = "/Script/Engine.KismetSystemLibrary"
+
+# ---- behavior recipes: behavior name -> function(bp_path) that builds a compiling gameplay graph ----
+def _recipe_hello(p):
+    ev  = bp_event(p, "ReceiveBeginPlay", -400, 0)
+    ps  = bp_call(p, KSL, "PrintString", 0, 0)
+    bp_pin(p, ps, "InString", "GameForge entity ready")
+    bp_connect(p, ev, "then", ps, "execute")
+
+def _recipe_spin(p):
+    ev  = bp_event(p, "ReceiveTick", -400, 0)
+    rot = bp_call(p, "", "K2_AddActorLocalRotation", 0, 0)   # "" = self/Actor
+    bp_pin(p, rot, "DeltaRotation", "(Pitch=0.0,Yaw=2.0,Roll=0.0)")
+    bp_connect(p, ev, "then", rot, "execute")
+
+def _recipe_auto_move(p):
+    ev  = bp_event(p, "ReceiveTick", -400, 0)
+    mv  = bp_call(p, "", "K2_AddActorWorldOffset", 0, 0)
+    bp_pin(p, mv, "DeltaLocation", "(X=0.0,Y=3.0,Z=0.0)")
+    bp_connect(p, ev, "then", mv, "execute")
+
+def _recipe_input_move(p, axis, direction):
+    # add a movement component so AddMovementInput takes effect, then wire the axis value into it
+    bp_component(p, "/Script/Engine.FloatingPawnMovement", "Movement")
+    ax  = bp_input_axis(p, axis, -400, 0)
+    mv  = bp_call(p, "/Script/Engine.Pawn", "AddMovementInput", 0, 0)
+    bp_pin(p, mv, "WorldDirection", direction)
+    bp_connect(p, ax, "then", mv, "execute")
+    bp_connect(p, ax, "Axis Value", mv, "ScaleValue")   # float -> float, clean
+
+RECIPES = {
+    "hello":     _recipe_hello,
+    "spin":      _recipe_spin,
+    "collectible": _recipe_spin,          # spinning pickup
+    "auto_move": _recipe_auto_move,
+    "bounce":    _recipe_auto_move,       # placeholder motion; refine per game
+    "move_lr":   lambda p: _recipe_input_move(p, "MoveRight", "(X=1.0,Y=0.0,Z=0.0)"),
+    "move_ud":   lambda p: _recipe_input_move(p, "MoveUp",    "(X=0.0,Y=0.0,Z=1.0)"),
+}
+
 
 # ---- local generators (all on the GB10) ----
 def gen_mesh(kind, out):
@@ -81,10 +130,21 @@ def stage_assets(spec):
 
 def stage_assemble(spec):
     for e in spec.get("entities", []):
-        path = bp_create("/Game/Blueprints", e["name"], e.get("parent", "/Script/Engine.Actor"))
-        # components / variables / graph wiring are added here per the entity's spec via rc_call(...)
-        bp_compile(path); bp_save("/Game/Blueprints/" + e["name"])
-        print("  entity", e["name"], "->", path)
+        path = bp_create("/Game/Blueprints", e["name"], e.get("parent", ACTOR))
+        if not path:
+            print("  entity", e["name"], "-> FAILED to create"); continue
+        # give it a visible body if a mesh was specified (mesh asset set via SetComponentProperty)
+        if e.get("mesh"):
+            bp_component(path, "/Script/Engine.StaticMeshComponent", "Body")
+            rc_call("SetComponentProperty", {"BlueprintPath": path, "ComponentName": "Body",
+                    "PropertyName": "StaticMesh", "Value": e["mesh"]})
+        # wire each behavior into a real gameplay graph
+        for b in e.get("behaviors", []):
+            fn = RECIPES.get(b)
+            if fn: fn(path); print("    behavior", b, "wired")
+            else:  print("    behavior", b, "(no recipe yet)")
+        ok = bp_compile(path); bp_save("/Game/Blueprints/" + e["name"])
+        print("  entity", e["name"], "-> compiled:", ok)
     for lv in spec.get("levels", []):
         for p in lv.get("place", []):
             print("  place", p["class"], "->", spawn(p["class"], p.get("at", {"X":0,"Y":0,"Z":0})))

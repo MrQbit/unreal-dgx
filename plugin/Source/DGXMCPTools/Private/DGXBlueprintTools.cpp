@@ -23,6 +23,7 @@
 #include "K2Node_Event.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
+#include "K2Node_InputAxisEvent.h"
 #include "Engine/MemberReference.h"
 #include "AssetImportTask.h"
 #include "AssetToolsModule.h"
@@ -248,6 +249,38 @@ FString UDGXBlueprintTools::AddEventNode(const FString& BlueprintPath, const FSt
 	if (!Node) { return FString(); }
 	Node->NodePosX = (int32)NodePosX;
 	return Node->NodeGuid.ToString();
+}
+
+FString UDGXBlueprintTools::AddInputAxisEvent(const FString& BlueprintPath, const FString& AxisName, float NodePosX, float NodePosY)
+{
+	UBlueprint* BP = DGX_LoadBlueprint(BlueprintPath);
+	UEdGraph* Graph = DGX_GetGraph(BP, FString());
+	if (!BP || !Graph) { return FString(); }
+
+	FGraphNodeCreator<UK2Node_InputAxisEvent> Creator(*Graph);
+	UK2Node_InputAxisEvent* Node = Creator.CreateNode(false);
+	Node->InputAxisName = FName(*AxisName);
+	Node->NodePosX = (int32)NodePosX;
+	Node->NodePosY = (int32)NodePosY;
+	Creator.Finalize();
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(BP);
+	return Node->NodeGuid.ToString();
+}
+
+bool UDGXBlueprintTools::SetPinDefault(const FString& BlueprintPath, const FString& GraphName,
+	const FString& NodeGuid, const FString& PinName, const FString& Value)
+{
+	UBlueprint* BP = DGX_LoadBlueprint(BlueprintPath);
+	UEdGraph* Graph = DGX_GetGraph(BP, GraphName);
+	if (!BP || !Graph) { return false; }
+	UEdGraphNode* Node = DGX_FindNode(Graph, NodeGuid);
+	if (!Node) { return false; }
+	UEdGraphPin* Pin = Node->FindPin(FName(*PinName));
+	if (!Pin) { return false; }
+	const UEdGraphSchema_K2* Schema = GetDefault<UEdGraphSchema_K2>();
+	Schema->TrySetDefaultValue(*Pin, Value);
+	FBlueprintEditorUtils::MarkBlueprintAsModified(BP);
+	return true;
 }
 
 FString UDGXBlueprintTools::AddVariableNode(const FString& BlueprintPath, const FString& GraphName,
