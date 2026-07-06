@@ -6,3 +6,4 @@
 Binaries/
 Intermediate/
 .claude/
+__pycache__/
