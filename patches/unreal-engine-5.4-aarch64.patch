@@ -215,6 +215,22 @@ index eacd56f2b..f303da467 100644
  			// Don't enable USD when running the include tool because it has issues parsing Boost headers
  			if (Target.GlobalDefinitions.Contains("UE_INCLUDE_TOOL=1"))
  			{
+diff --git a/Engine/Plugins/Interchange/Runtime/Source/ThirdParty/Draco/Draco.Build.cs b/Engine/Plugins/Interchange/Runtime/Source/ThirdParty/Draco/Draco.Build.cs
+index 8952c2336..fe28fcb39 100644
+--- a/Engine/Plugins/Interchange/Runtime/Source/ThirdParty/Draco/Draco.Build.cs
++++ b/Engine/Plugins/Interchange/Runtime/Source/ThirdParty/Draco/Draco.Build.cs
+@@ -28,7 +28,10 @@ public class Draco : ModuleRules
+ 		}
+ 		else if (Target.Platform == UnrealTargetPlatform.Linux)
+ 		{
+-			string MacOSDracoLibsDir = Path.Combine(DracoLibsDir, "Linux");
++			// arch-specific subfolder so an arm64 (DGX) rebuild and the stock x86_64 lib coexist —
++			// lets the same tree build both the native arm64 editor and an x86_64 (SteamOS) target.
++			string LinuxArchDir = (Target.Architecture == UnrealArch.Arm64) ? "aarch64-unknown-linux-gnueabi" : "x86_64-unknown-linux-gnu";
++			string MacOSDracoLibsDir = Path.Combine(DracoLibsDir, "Linux", LinuxArchDir);
+ 
+ 			PublicSystemIncludePaths.Add(DracoIncDir);
+ 			PublicSystemLibraryPaths.Add(MacOSDracoLibsDir);
 diff --git a/Engine/Plugins/Media/ImgMedia/Source/ImgMedia/ImgMedia.Build.cs b/Engine/Plugins/Media/ImgMedia/Source/ImgMedia/ImgMedia.Build.cs
 index 0be6f7b0a..32b3586dd 100644
 --- a/Engine/Plugins/Media/ImgMedia/Source/ImgMedia/ImgMedia.Build.cs
@@ -492,7 +508,7 @@ index a4c37a446..c574c5002 100644
  
  				foreach (string CmdLineArg in CmdLine)
 diff --git a/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxToolChain.cs b/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxToolChain.cs
-index 1b19b5895..480680316 100644
+index 1b19b5895..dc9cfe376 100644
 --- a/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxToolChain.cs
 +++ b/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxToolChain.cs
 @@ -54,11 +54,12 @@ namespace UnrealBuildTool
@@ -511,7 +527,7 @@ index 1b19b5895..480680316 100644
  						Info.ClangVersion)
  					);
  			}
-@@ -152,6 +153,23 @@ namespace UnrealBuildTool
+@@ -152,6 +153,26 @@ namespace UnrealBuildTool
  			return bIsCrossCompiling;
  		}
  
@@ -529,13 +545,16 @@ index 1b19b5895..480680316 100644
 +		{
 +			string? Root = System.Environment.GetEnvironmentVariable("UE_X64_SYSROOT");
 +			if (String.IsNullOrEmpty(Root)) { Root = "/home/mrqbit/x86_64-sysroot"; }
-+			return DirectoryReference.FromString(System.IO.Path.Combine(Root, "usr", "lib", Arch.LinuxName));
++			// Ubuntu multiarch puts the amd64 libc++/libc++abi under "x86_64-linux-gnu" (GNU triple),
++			// not UE's "x86_64-unknown-linux-gnu". Map to the actual multiarch dir.
++			string MultiArch = (Arch == UnrealArch.Arm64) ? "aarch64-linux-gnu" : "x86_64-linux-gnu";
++			return DirectoryReference.FromString(System.IO.Path.Combine(Root, "usr", "lib", MultiArch));
 +		}
 +
  		protected internal virtual string GetDumpEncodeDebugCommand(LinkEnvironment LinkEnvironment, FileItem OutputFile)
  		{
  			bool bUseCmdExe = BuildHostPlatform.Current.Platform == UnrealTargetPlatform.Win64;
-@@ -169,7 +187,12 @@ namespace UnrealBuildTool
+@@ -169,7 +190,12 @@ namespace UnrealBuildTool
  			StringWriter Out = new StringWriter();
  			Out.NewLine = bUseCmdExe ? "\r\n" : "\n";
  
@@ -549,7 +568,7 @@ index 1b19b5895..480680316 100644
  			{
  				// dump_syms
  				Out.WriteLine(DumpCommand,
-@@ -292,6 +315,17 @@ namespace UnrealBuildTool
+@@ -292,6 +318,17 @@ namespace UnrealBuildTool
  			return false;
  		}
  
@@ -567,7 +586,7 @@ index 1b19b5895..480680316 100644
  		/// <inheritdoc/>
  		protected override void GetCompileArguments_WarningsAndErrors(CppCompileEnvironment CompileEnvironment, List<string> Arguments)
  		{
-@@ -300,6 +334,13 @@ namespace UnrealBuildTool
+@@ -300,6 +337,13 @@ namespace UnrealBuildTool
  			//Arguments.Add("-Wunreachable-code");            // additional warning not normally included in Wall: warns if there is code that will never be executed - not helpful due to bIsGCC and similar
  
  			Arguments.Add("-Wno-undefined-bool-conversion"); // hides checking if 'this' pointer is null
@@ -581,7 +600,7 @@ index 1b19b5895..480680316 100644
  		}
  
  		private void AddLTOFlags(List<string> Arguments, bool bForLinker)
-@@ -547,9 +588,20 @@ namespace UnrealBuildTool
+@@ -547,9 +591,20 @@ namespace UnrealBuildTool
  			Arguments.Add("--driver-mode=g++");
  			if (ShouldUseLibcxx())
  			{
@@ -605,7 +624,7 @@ index 1b19b5895..480680316 100644
  			}
  
  			if (CompilerVersionGreaterOrEqual(12, 0, 0))
-@@ -616,6 +668,23 @@ namespace UnrealBuildTool
+@@ -616,6 +671,23 @@ namespace UnrealBuildTool
  				Arguments.Add($"-target {CompileEnvironment.Architecture.LinuxName}");        // Set target triple
  				Arguments.Add($"--sysroot=\"{NormalizeCommandLinePath(LinuxInfo.BaseLinuxPath!)}\"");
  			}
@@ -629,7 +648,7 @@ index 1b19b5895..480680316 100644
  		}
  
  		/// <inheritdoc/>
-@@ -862,6 +931,16 @@ namespace UnrealBuildTool
+@@ -862,6 +934,16 @@ namespace UnrealBuildTool
  					Arguments.Add($"-L\"{NormalizeCommandLinePath(DirectoryReference.Combine(SysRootPath, "usr", "lib64"))}\"");
  				}
  			}
@@ -646,7 +665,7 @@ index 1b19b5895..480680316 100644
  		}
  
  		string GetArchiveArguments(LinkEnvironment LinkEnvironment)
-@@ -1405,16 +1484,27 @@ namespace UnrealBuildTool
+@@ -1405,16 +1487,27 @@ namespace UnrealBuildTool
  
  			if (ShouldUseLibcxx())
  			{

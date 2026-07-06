@@ -1,7 +1,16 @@
 # Targeting SteamOS / Steam Deck (x86_64 Linux) from the arm64 DGX
 
-**Status: the cross-toolchain is set up and proven — the DGX builds real x86_64 Linux binaries.**
-Full UE *engine* cross-packaging needs one more integration step in UnrealBuildTool (below).
+**Status: DONE — the arm64 DGX cross-builds a full native x86_64 UE game.** The Pong sample built as
+a complete `ELF 64-bit x86-64` game executable (receipt `TargetType: Game, Architecture: x64`) — a
+runnable SteamOS / Steam Deck binary produced on the ARM64 box. The native arm64 build still works
+from the same tree (per-arch library selection), so both targets coexist.
+
+Build it:
+```
+export UE_X64_SYSROOT=$HOME/x86_64-sysroot
+./Engine/Build/BatchFiles/Linux/Build.sh <Game> Linux Development \
+   -Project=<proj>.uproject -ForceUseSystemCompiler -Architecture=x64
+```
 
 SteamOS / Steam Deck is **x86_64 Linux + Vulkan** — a natural fit for this editor (it already cooks
 Vulkan content). The only missing piece was compiling x86_64 *binaries* on an ARM64 host. That now
@@ -45,7 +54,21 @@ The libc++/libc++abi **headers are architecture-independent** (same for arm64 an
 `libc++.so` link cleanly. UBT already emits `-lc++ -lc++abi` (from the arm64 port patch), which is
 exactly what the cross-link needs.
 
-## Remaining step for a full UE x86_64 *package*
+## The UBT integration (done)
+
+UnrealBuildTool now treats **x86_64 as a target arch when the host is arm64**:
+- `LinuxToolChain.cs` — `IsSystemCrossCompile()` mode: system clang emits `-target x86_64-unknown-linux-gnu`
+  and links the x86_64 libc++ from `UE_X64_SYSROOT` (Ubuntu multiarch dir `x86_64-linux-gnu`). No UE
+  `--sysroot`; clang's multiarch + the OS x86_64 cross-gcc supply crt/libc/libgcc.
+- `UEBuildLinux.cs` — the `Linux` platform advertises both arm64 + x64 (arm64 default, x64 via
+  `-Architecture=x64`); and ISPC is disabled whenever the *host* is arm64.
+- Per-arch third-party libs: any lib that was rebuilt for arm64 in-place (e.g. **Draco**) is moved to
+  an arch subfolder and its `Build.cs` selects `aarch64-...` vs `x86_64-...` by `Target.Architecture`,
+  so the stock x86_64 lib is used for the x64 target and the arm64 rebuild for the editor. If you find
+  another such lib, apply the same split (keep the stock x86_64 `.a`, put the arm64 rebuild in an
+  arch subfolder, make the `Build.cs` arch-aware).
+
+<details><summary>Historical: what the integration required</summary>
 
 The toolchain works; wiring it into a full engine/game build needs UnrealBuildTool to treat **x86_64
 as a target arch when the host is arm64**:
@@ -65,11 +88,13 @@ In short: **cross-toolchain = done and proven; the follow-on is a UBT arch-targe
 well-understood) plus a long first x86_64 build. Alternatively, package the x86_64 build on any small
 x86_64 Linux runner — the project is portable.
 
+</details>
+
 ## Recap of the platform picture
 
 | Target | From this DGX |
 |---|---|
 | Linux **arm64** | ✅ native (done — see PongGame) |
-| Linux **x86_64 / SteamOS** | ✅ toolchain proven; UBT arch-targeting patch pending |
+| Linux **x86_64 / SteamOS** | ✅ DONE — cross-builds a native x86-64 game (Pong verified) |
 | **Android** | ✅ with the NDK (Vulkan/GLES cook already works) |
 | **Windows / macOS / iOS** | ❌ package on those OSes (D3D/Metal + toolchains are OS-bound) |
