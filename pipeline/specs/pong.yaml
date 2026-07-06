@@ -1,0 +1,16 @@
+name: Pong
+genre: arcade
+style: "clean neon on black, minimalist"
+assets:
+  - {type: mesh,  file: paddle.glb, kind: platform, dest: /Game/Meshes}
+  - {type: mesh,  file: ball.glb,   kind: coin,     dest: /Game/Meshes}
+  - {type: music, file: bgm.wav,    prompt: "minimal retro arcade loop, 8-bit"}
+entities:
+  - {name: BP_Paddle, parent: /Script/Engine.Pawn,  behaviors: [move_ud]}
+  - {name: BP_Ball,   parent: /Script/Engine.Actor, behaviors: [bounce, score]}
+levels:
+  - name: Court
+    place:
+      - {class: /Game/Blueprints/BP_Paddle.BP_Paddle_C, at: {X: -640, Y: 0, Z: 0}}
+      - {class: /Game/Blueprints/BP_Paddle.BP_Paddle_C, at: {X:  640, Y: 0, Z: 0}}
+      - {class: /Game/Blueprints/BP_Ball.BP_Ball_C,     at: {X: 0,    Y: 0, Z: 0}}

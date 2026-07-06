@@ -84,4 +84,16 @@ public:
 	/** List the node GUIDs + titles in a graph (JSON), to inspect what was built. */
 	UFUNCTION(BlueprintCallable, Category = "DGX|Blueprint")
 	static FString DescribeGraph(const FString& BlueprintPath, const FString& GraphName);
+
+	// ---- asset import (the generation pipeline: Blender glTF, textures, audio -> UE assets) ----
+
+	/** Import any source asset file into the project via the appropriate factory/translator:
+	 *  .glb/.gltf (mesh+material+anim via Interchange), .png/.jpg/.tga (texture), .wav (sound), etc.
+	 *  DestPath is a content path like "/Game/Meshes". Returns the imported object's path or "". */
+	UFUNCTION(BlueprintCallable, Category = "DGX|Assets")
+	static FString ImportAsset(const FString& SourceFile, const FString& DestPath);
+
+	/** Set a Static Mesh (by asset path) on a StaticMeshActor previously spawned into the level. */
+	UFUNCTION(BlueprintCallable, Category = "DGX|Assets")
+	static bool SetActorStaticMesh(const FString& ActorPath, const FString& StaticMeshPath);
 };

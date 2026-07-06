@@ -24,6 +24,13 @@
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
 #include "Engine/MemberReference.h"
+#include "AssetImportTask.h"
+#include "AssetToolsModule.h"
+#include "IAssetTools.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
+#include "Components/StaticMeshComponent.h"
+#include "EngineUtils.h"
 
 DEFINE_LOG_CATEGORY_STATIC(LogDGXMCP, Log, All);
 
@@ -357,4 +364,43 @@ FString UDGXBlueprintTools::DescribeGraph(const FString& BlueprintPath, const FS
 	}
 	Out += TEXT("]}");
 	return Out;
+}
+
+FString UDGXBlueprintTools::ImportAsset(const FString& SourceFile, const FString& DestPath)
+{
+	if (!FPaths::FileExists(SourceFile)) { UE_LOG(LogDGXMCP, Warning, TEXT("ImportAsset: no file %s"), *SourceFile); return FString(); }
+
+	UAssetImportTask* Task = NewObject<UAssetImportTask>();
+	Task->Filename = SourceFile;
+	Task->DestinationPath = DestPath;
+	Task->bAutomated = true;
+	Task->bReplaceExisting = true;
+	Task->bSave = true;
+	Task->bAsync = false;
+
+	FAssetToolsModule& AssetToolsModule = FModuleManager::LoadModuleChecked<FAssetToolsModule>("AssetTools");
+	TArray<UAssetImportTask*> Tasks; Tasks.Add(Task);
+	AssetToolsModule.Get().ImportAssetTasks(Tasks);
+
+	const TArray<UObject*> Imported = Task->GetObjects();
+	if (Imported.Num() > 0 && Imported[0]) { return Imported[0]->GetPathName(); }
+	if (Task->ImportedObjectPaths.Num() > 0) { return Task->ImportedObjectPaths[0]; }
+	return FString();
+}
+
+bool UDGXBlueprintTools::SetActorStaticMesh(const FString& ActorPath, const FString& StaticMeshPath)
+{
+	UStaticMesh* Mesh = LoadObject<UStaticMesh>(nullptr, *StaticMeshPath);
+	if (!Mesh || !GEditor) { return false; }
+	UWorld* World = GEditor->GetEditorWorldContext().World();
+	if (!World) { return false; }
+	for (TActorIterator<AStaticMeshActor> It(World); It; ++It)
+	{
+		if (It->GetPathName() == ActorPath || It->GetName() == ActorPath)
+		{
+			It->SetMobility(EComponentMobility::Movable);
+			if (UStaticMeshComponent* MC = It->GetStaticMeshComponent()) { MC->SetStaticMesh(Mesh); return true; }
+		}
+	}
+	return false;
 }

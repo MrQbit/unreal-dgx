@@ -278,5 +278,19 @@ def bp_spawn(class_path: str, location: dict | None = None, rotation: dict | Non
                               "Rotation": rotation or {"Pitch": 0, "Yaw": 0, "Roll": 0}})
 
 
+@mcp.tool()
+def asset_import(source_file: str, dest_path: str = "/Game/Imported") -> dict:
+    """Import a generated asset file into the project (the generation pipeline entry point).
+    Handles .glb/.gltf meshes (Interchange), .png/.jpg/.tga textures, .wav sounds, etc.
+    source_file is an absolute path on disk; dest_path is a content path. Returns the asset path."""
+    return _bp("ImportAsset", {"SourceFile": source_file, "DestPath": dest_path})
+
+
+@mcp.tool()
+def asset_set_actor_mesh(actor_path: str, static_mesh_path: str) -> dict:
+    """Assign an imported StaticMesh to a StaticMeshActor already in the level."""
+    return _bp("SetActorStaticMesh", {"ActorPath": actor_path, "StaticMeshPath": static_mesh_path})
+
+
 if __name__ == "__main__":
     mcp.run()
