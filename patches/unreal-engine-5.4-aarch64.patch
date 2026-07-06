@@ -469,6 +469,47 @@ index 2eac2f15d..57511971d 100644
  
  		/// <summary>
  		/// Whether we're running on a build machine
+diff --git a/Engine/Source/Programs/Shared/EpicGames.MsBuild/CsProjBuilder.cs b/Engine/Source/Programs/Shared/EpicGames.MsBuild/CsProjBuilder.cs
+index fe21d55e9..34e5f274b 100644
+--- a/Engine/Source/Programs/Shared/EpicGames.MsBuild/CsProjBuilder.cs
++++ b/Engine/Source/Programs/Shared/EpicGames.MsBuild/CsProjBuilder.cs
+@@ -597,16 +597,29 @@ namespace EpicGames.MsBuild
+ 			}
+ 			DotnetProcess.WaitForExit();
+ 
+-			if (ListOfSdks.Count != 1)
++			if (ListOfSdks.Count == 0)
+ 			{
+-				throw new Exception("Expected only one sdk installed for bundled dotnet");
++				throw new Exception("No .NET SDK found for " + Hook.DotnetPath.FullName);
+ 			}
+ 
+-			// Expected output has this form:
+-			// 3.1.403 [D:\UE5_Main\engine\binaries\ThirdParty\DotNet\Windows\sdk]
+-			string SdkVersion = ListOfSdks[0].Split(' ')[0];
+-
+-			DirectoryReference DotnetSdkDirectory = DirectoryReference.Combine(Hook.DotnetDirectory, "sdk", SdkVersion);
++			// Expected output line form: "8.0.422 [/home/user/.dotnet/sdk]".
++			// Use the LAST (highest) SDK and its REAL base directory (parsed from the brackets) rather
++			// than assuming the bundled DotNet dir + a single SDK. This lets a system arm64 dotnet (which
++			// may expose several SDKs and lives outside Engine/Binaries/ThirdParty/DotNet) work.
++			string SdkLine = ListOfSdks[ListOfSdks.Count - 1];
++			string SdkVersion = SdkLine.Split(' ')[0];
++			int BracketOpen = SdkLine.IndexOf('[');
++			int BracketClose = SdkLine.LastIndexOf(']');
++			DirectoryReference DotnetSdkDirectory;
++			if (BracketOpen >= 0 && BracketClose > BracketOpen)
++			{
++				string SdkBaseDir = SdkLine.Substring(BracketOpen + 1, BracketClose - BracketOpen - 1).Trim();
++				DotnetSdkDirectory = DirectoryReference.Combine(new DirectoryReference(SdkBaseDir), SdkVersion);
++			}
++			else
++			{
++				DotnetSdkDirectory = DirectoryReference.Combine(Hook.DotnetDirectory, "sdk", SdkVersion);
++			}
+ 			if (!DirectoryReference.Exists(DotnetSdkDirectory))
+ 			{
+ 				throw new Exception("Failed to find .NET SDK directory: " + DotnetSdkDirectory.FullName);
 diff --git a/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxCommon.cs b/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxCommon.cs
 index aa00470d9..449cf3f58 100644
 --- a/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxCommon.cs
