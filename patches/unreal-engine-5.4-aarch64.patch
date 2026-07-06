@@ -492,7 +492,7 @@ index a4c37a446..c574c5002 100644
  
  				foreach (string CmdLineArg in CmdLine)
 diff --git a/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxToolChain.cs b/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxToolChain.cs
-index 1b19b5895..6be0527a0 100644
+index 1b19b5895..480680316 100644
 --- a/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxToolChain.cs
 +++ b/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/LinuxToolChain.cs
 @@ -54,11 +54,12 @@ namespace UnrealBuildTool
@@ -511,7 +511,31 @@ index 1b19b5895..6be0527a0 100644
  						Info.ClangVersion)
  					);
  			}
-@@ -169,7 +170,12 @@ namespace UnrealBuildTool
+@@ -152,6 +153,23 @@ namespace UnrealBuildTool
+ 			return bIsCrossCompiling;
+ 		}
+ 
++		// True when building with the SYSTEM clang for a TARGET arch different from the host arch
++		// (e.g. x86_64 / SteamOS from an arm64 DGX). We cross via system clang's own multiarch + the
++		// OS x86_64 cross-gcc; libc++ for the target comes from a manually-provided sysroot
++		// (env UE_X64_SYSROOT). No UE bundled toolchain / --sysroot is used in this mode.
++		protected bool IsSystemCrossCompile()
++		{
++			return !bIsCrossCompiling && PlatformSDK.ForceUseSystemCompiler()
++				&& Architecture != LinuxPlatform.DefaultHostArchitecture;
++		}
++
++		protected static DirectoryReference? GetSystemCrossLibDir(UnrealArch Arch)
++		{
++			string? Root = System.Environment.GetEnvironmentVariable("UE_X64_SYSROOT");
++			if (String.IsNullOrEmpty(Root)) { Root = "/home/mrqbit/x86_64-sysroot"; }
++			return DirectoryReference.FromString(System.IO.Path.Combine(Root, "usr", "lib", Arch.LinuxName));
++		}
++
+ 		protected internal virtual string GetDumpEncodeDebugCommand(LinkEnvironment LinkEnvironment, FileItem OutputFile)
+ 		{
+ 			bool bUseCmdExe = BuildHostPlatform.Current.Platform == UnrealTargetPlatform.Win64;
+@@ -169,7 +187,12 @@ namespace UnrealBuildTool
  			StringWriter Out = new StringWriter();
  			Out.NewLine = bUseCmdExe ? "\r\n" : "\n";
  
@@ -525,7 +549,7 @@ index 1b19b5895..6be0527a0 100644
  			{
  				// dump_syms
  				Out.WriteLine(DumpCommand,
-@@ -292,6 +298,17 @@ namespace UnrealBuildTool
+@@ -292,6 +315,17 @@ namespace UnrealBuildTool
  			return false;
  		}
  
@@ -543,7 +567,7 @@ index 1b19b5895..6be0527a0 100644
  		/// <inheritdoc/>
  		protected override void GetCompileArguments_WarningsAndErrors(CppCompileEnvironment CompileEnvironment, List<string> Arguments)
  		{
-@@ -300,6 +317,13 @@ namespace UnrealBuildTool
+@@ -300,6 +334,13 @@ namespace UnrealBuildTool
  			//Arguments.Add("-Wunreachable-code");            // additional warning not normally included in Wall: warns if there is code that will never be executed - not helpful due to bIsGCC and similar
  
  			Arguments.Add("-Wno-undefined-bool-conversion"); // hides checking if 'this' pointer is null
@@ -557,7 +581,7 @@ index 1b19b5895..6be0527a0 100644
  		}
  
  		private void AddLTOFlags(List<string> Arguments, bool bForLinker)
-@@ -547,9 +571,20 @@ namespace UnrealBuildTool
+@@ -547,9 +588,20 @@ namespace UnrealBuildTool
  			Arguments.Add("--driver-mode=g++");
  			if (ShouldUseLibcxx())
  			{
@@ -581,10 +605,16 @@ index 1b19b5895..6be0527a0 100644
  			}
  
  			if (CompilerVersionGreaterOrEqual(12, 0, 0))
-@@ -618,6 +653,19 @@ namespace UnrealBuildTool
+@@ -616,6 +668,23 @@ namespace UnrealBuildTool
+ 				Arguments.Add($"-target {CompileEnvironment.Architecture.LinuxName}");        // Set target triple
+ 				Arguments.Add($"--sysroot=\"{NormalizeCommandLinePath(LinuxInfo.BaseLinuxPath!)}\"");
  			}
- 		}
- 
++			else if (IsSystemCrossCompile())
++			{
++				Arguments.Add($"-target {CompileEnvironment.Architecture.LinuxName}");
++			}
++		}
++
 +		/// <inheritdoc/>
 +		protected override void GetCompileArguments_C(CppCompileEnvironment CompileEnvironment, List<string> Arguments)
 +		{
@@ -596,12 +626,27 @@ index 1b19b5895..6be0527a0 100644
 +			{
 +				Arguments.Add("-Wno-unused-command-line-argument");
 +			}
-+		}
-+
+ 		}
+ 
  		/// <inheritdoc/>
- 		protected override string EscapePreprocessorDefinition(string Definition)
- 		{
-@@ -1405,16 +1453,27 @@ namespace UnrealBuildTool
+@@ -862,6 +931,16 @@ namespace UnrealBuildTool
+ 					Arguments.Add($"-L\"{NormalizeCommandLinePath(DirectoryReference.Combine(SysRootPath, "usr", "lib64"))}\"");
+ 				}
+ 			}
++			else if (IsSystemCrossCompile())
++			{
++				Arguments.Add($"-target {LinkEnvironment.Architecture.LinuxName}");
++				DirectoryReference? CrossLib = GetSystemCrossLibDir(LinkEnvironment.Architecture);
++				if (CrossLib != null)
++				{
++					Arguments.Add($"-L\"{NormalizeCommandLinePath(CrossLib)}\"");
++					Arguments.Add($"-Wl,-rpath-link,\"{NormalizeCommandLinePath(CrossLib)}\"");
++				}
++			}
+ 		}
+ 
+ 		string GetArchiveArguments(LinkEnvironment LinkEnvironment)
+@@ -1405,16 +1484,27 @@ namespace UnrealBuildTool
  
  			if (ShouldUseLibcxx())
  			{
@@ -640,7 +685,7 @@ index 1b19b5895..6be0527a0 100644
  
  			// these can be helpful for understanding the order of libraries or library search directories
 diff --git a/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/UEBuildLinux.cs b/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/UEBuildLinux.cs
-index fab754dca..368c7c5a6 100644
+index fab754dca..94d7f2e9d 100644
 --- a/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/UEBuildLinux.cs
 +++ b/Engine/Source/Programs/UnrealBuildTool/Platform/Linux/UEBuildLinux.cs
 @@ -24,7 +24,7 @@ namespace UnrealBuildTool
@@ -652,16 +697,35 @@ index fab754dca..368c7c5a6 100644
  				{
  					return LinuxToolchainArchitectures[this];
  				}
-@@ -157,7 +157,7 @@ namespace UnrealBuildTool
+@@ -157,18 +157,40 @@ namespace UnrealBuildTool
  	class LinuxArchitectureConfig : UnrealArchitectureConfig
  	{
  		public LinuxArchitectureConfig(UnrealTargetPlatform Platform)
 -			: base(Platform == UnrealTargetPlatform.Linux ? UnrealArch.X64 : UnrealArch.Arm64)
-+			: base(Platform == UnrealTargetPlatform.Linux ? LinuxPlatform.DefaultHostArchitecture : UnrealArch.Arm64)
++			// The "Linux" platform supports BOTH arm64 and x86_64 as single-architecture targets: the
++			// host arch is the default (native build), and the other arch is an opt-in cross-target you
++			// select with -Architecture= (e.g. -Architecture=x64 to build for SteamOS/Steam Deck from
++			// the arm64 DGX). SingleArchitecture mode keeps native builds free of arch-suffixed paths.
++			: base(UnrealArchitectureMode.SingleArchitecture,
++				Platform == UnrealTargetPlatform.Linux
++					? new[] { UnrealArch.X64, UnrealArch.Arm64 }
++					: new[] { UnrealArch.Arm64 })
  		{
  		}
++
++		// Default to the HOST architecture when none is explicitly requested (so native builds are
++		// unchanged); the other supported arch is opted into via -Architecture=.
++		public override UnrealArchitectures ActiveArchitectures(FileReference? ProjectFile, string? TargetName)
++		{
++			return new UnrealArchitectures(LinuxPlatform.DefaultHostArchitecture);
++		}
++
++		public override UnrealArch GetHostArchitecture()
++		{
++			return LinuxPlatform.DefaultHostArchitecture;
++		}
  	}
-@@ -165,10 +165,13 @@ namespace UnrealBuildTool
+ 
  	class LinuxPlatform : UEBuildPlatform
  	{
  		/// <summary>
@@ -678,13 +742,15 @@ index fab754dca..368c7c5a6 100644
  
  		/// <summary>
  		/// SDK in use by the platform
-@@ -280,6 +283,13 @@ namespace UnrealBuildTool
+@@ -280,6 +302,15 @@ namespace UnrealBuildTool
  
  			Target.bCompileISPC = true;
  
-+			// The bundled ISPC compiler is an x86_64 binary targeting x86 ISAs; it cannot run on an
-+			// aarch64 host. Disable ISPC there so modules use their C++ fallback paths (INTEL_ISPC=0).
-+			if (Target.Architecture == UnrealArch.Arm64)
++			// The bundled ISPC compiler is an x86_64 binary; it cannot run on an aarch64 HOST regardless
++			// of the target arch. Disable ISPC whenever the host is aarch64 (also covers cross-compiling
++			// an x86_64 target from the DGX) so modules use their C++ fallback paths (INTEL_ISPC=0).
++			if (Target.Architecture == UnrealArch.Arm64 ||
++				System.Runtime.InteropServices.RuntimeInformation.OSArchitecture == System.Runtime.InteropServices.Architecture.Arm64)
 +			{
 +				Target.bCompileISPC = false;
 +			}
@@ -692,7 +758,7 @@ index fab754dca..368c7c5a6 100644
  			if (Target.bIWYU)
  			{
  				IWYUToolChain.ValidateTarget(Target);
-@@ -468,7 +478,14 @@ namespace UnrealBuildTool
+@@ -468,7 +499,14 @@ namespace UnrealBuildTool
  			DirectoryReference? BaseLinuxPath = SDK.GetBaseLinuxPathForArchitecture(Target.Architecture);
  			if (BuildHostPlatform.Current.Platform == UnrealTargetPlatform.Linux && BaseLinuxPath == null)
  			{
