@@ -7,3 +7,6 @@ Binaries/
 Intermediate/
 .claude/
 __pycache__/
+
+# downloaded CC0 asset library (fetch with pipeline/fetch_spine.py)
+pipeline/__pycache__/

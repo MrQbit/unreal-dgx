@@ -1,0 +1,24 @@
+# A greybox 3D FPS built on the CC0 asset spine (assets/fps_spine.yaml) + generated variation.
+name: GreyboxFPS
+genre: fps
+style: "gritty industrial sci-fi"
+
+# Generated on top of the CC0 spine (textures/music/voice); library assets provide the foundation.
+assets:
+  - {type: image, file: wall_panel.png, prompt: "seamless scuffed metal panel wall texture, industrial, tileable", dest: /Game/Textures}
+  - {type: music, file: combat_bgm.wav, prompt: "tense industrial combat loop, driving drums, sci-fi"}
+  - {type: voice, file: alert.wav,      text: "Intruder detected."}
+
+entities:
+  # Player: Character so movement + jump work; auto-possess Player 0 (set in GameMode).
+  - {name: BP_Player, parent: /Script/Engine.Character, behaviors: [fps_controller, jump, shoot]}
+  # Enemy: dressed with a CC0 animated character from the spine (drop into /Game/Library/Characters).
+  - {name: BP_Enemy,  parent: /Script/Engine.Character, behaviors: [enemy],
+     mesh: /Game/Library/Characters/enemy}
+
+levels:
+  - name: Arena       # built from the CC0 prototype/modular kit + ambientCG materials + PolyHaven HDRI
+    place:
+      - {class: /Game/Blueprints/BP_Player.BP_Player_C, at: {X: 0,   Y: 0, Z: 120}}
+      - {class: /Game/Blueprints/BP_Enemy.BP_Enemy_C,   at: {X: 800, Y: 0, Z: 120}}
+      - {class: /Game/Blueprints/BP_Enemy.BP_Enemy_C,   at: {X: 500, Y: 400, Z: 120}}

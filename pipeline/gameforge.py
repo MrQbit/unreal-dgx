@@ -78,6 +78,44 @@ def _recipe_input_move(p, axis, direction):
     bp_connect(p, ax, "then", mv, "execute")
     bp_connect(p, ax, "Axis Value", mv, "ScaleValue")   # float -> float, clean
 
+PAWN = "/Script/Engine.Pawn"
+CHAR = "/Script/Engine.Character"
+
+# ---- FPS recipes (entity parent should be /Script/Engine.Character; auto-possess Player 0) ----
+def _recipe_fps_controller(p):
+    """First-person controller: camera + mouse look (Turn/LookUp) + WASD move (MoveForward/MoveRight)."""
+    bp_component(p, "/Script/Engine.CameraComponent", "FPCamera")
+    # look: axis "Axis Value" (float) -> controller yaw/pitch (float) — clean wire
+    for axis, fn in (("Turn", "AddControllerYawInput"), ("LookUp", "AddControllerPitchInput")):
+        ax = bp_input_axis(p, axis, -420, 0)
+        n  = bp_call(p, PAWN, fn, -60, 0)
+        bp_connect(p, ax, "then", n, "execute")
+        bp_connect(p, ax, "Axis Value", n, "Val")
+    # move: axis value -> AddMovementInput.ScaleValue (world-axis; camera-relative is a refinement)
+    for axis, direction in (("MoveForward", "(X=1.0,Y=0.0,Z=0.0)"), ("MoveRight", "(X=0.0,Y=1.0,Z=0.0)")):
+        ax = bp_input_axis(p, axis, -420, 0)
+        mv = bp_call(p, PAWN, "AddMovementInput", -60, 0)
+        bp_pin(p, mv, "WorldDirection", direction)
+        bp_connect(p, ax, "then", mv, "execute")
+        bp_connect(p, ax, "Axis Value", mv, "ScaleValue")
+
+def _recipe_jump(p):
+    ax = bp_input_axis(p, "Jump", -400, 200)   # (an action mapping named "Jump" also works)
+    jump = bp_call(p, CHAR, "Jump", 0, 200)
+    bp_connect(p, ax, "then", jump, "execute")
+
+def _recipe_shoot(p):
+    # Fire input -> hitscan. A full LineTraceByChannel graph is many fragile nodes; ship a clear hook
+    # (PrintString) that the agent replaces with a trace+damage graph per game. TODO: line trace.
+    ax = bp_input_axis(p, "Fire", -400, 400)
+    ps = bp_call(p, KSL, "PrintString", 0, 400)
+    bp_pin(p, ps, "InString", "Fire")
+    bp_connect(p, ax, "then", ps, "execute")
+
+def _recipe_enemy(p):
+    # simple patrol: Tick -> move forward. Chase-the-player is a refinement (GetPlayerPawn -> direction).
+    _recipe_auto_move(p)
+
 RECIPES = {
     "hello":     _recipe_hello,
     "spin":      _recipe_spin,
@@ -86,6 +124,11 @@ RECIPES = {
     "bounce":    _recipe_auto_move,       # placeholder motion; refine per game
     "move_lr":   lambda p: _recipe_input_move(p, "MoveRight", "(X=1.0,Y=0.0,Z=0.0)"),
     "move_ud":   lambda p: _recipe_input_move(p, "MoveUp",    "(X=0.0,Y=0.0,Z=1.0)"),
+    # FPS
+    "fps_controller": _recipe_fps_controller,
+    "jump":      _recipe_jump,
+    "shoot":     _recipe_shoot,
+    "enemy":     _recipe_enemy,
 }
 
 

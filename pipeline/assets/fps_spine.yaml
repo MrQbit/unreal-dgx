@@ -1,0 +1,115 @@
+# GameForge 3D-FPS asset spine — a curated CC0 (public-domain-equivalent) foundation.
+# Generation is reserved for VARIATION (restyle textures, custom music, level layout); this library
+# provides the FOUNDATION (characters, weapons, environments, materials, audio). All CC0 => clean for
+# personal AND redistributable use.
+#
+# fetch: "api"    -> auto-downloaded by fetch_spine.py (stable public API/URL)
+#        "manual" -> grab from the page (no stable script URL); license is CC0, drop into library/<role>/
+#
+# Formats: prefer glTF (works with the arm64 Interchange importer). FBX-only packs go FBX -> Blender
+# -> glTF via pipeline/blender (the arm64 build's FBX import is stubbed).
+
+library_root: ~/gameforge/library     # assets land here, organized by role
+
+roles:
+
+  characters:            # enemies + (optional) player body — rigged + animated
+    - name: quaternius_animated_characters
+      source: Quaternius
+      url: https://quaternius.com/packs/ultimateanimatedcharacter.html
+      license: CC0
+      fetch: manual
+      format: glTF+FBX
+      provides: [zombie, skeleton, robot, alien, soldier]   # idle/walk/run/attack/death anims
+    - name: kenney_mini_characters
+      source: Kenney
+      url: https://kenney.nl/assets/mini-characters-1
+      license: CC0
+      fetch: manual
+      format: glTF+FBX
+
+  weapons:
+    - name: quaternius_guns
+      source: Quaternius
+      url: https://quaternius.com/packs/guns.html
+      license: CC0
+      fetch: manual
+      format: glTF+FBX
+      provides: [pistol, rifle, shotgun, smg]
+    - name: kenney_blaster_kit
+      source: Kenney
+      url: https://kenney.nl/assets/blaster-kit
+      license: CC0
+      fetch: manual
+      format: glTF+FBX
+
+  environment:           # modular kits for building levels
+    - name: kenney_prototype_kit
+      source: Kenney
+      url: https://kenney.nl/assets/prototype-kit
+      license: CC0
+      fetch: manual
+      format: glTF+FBX
+      provides: [walls, floors, ramps, doors]      # greybox blockout
+    - name: quaternius_modular_dungeon
+      source: Quaternius
+      url: https://quaternius.com/packs/moderndungeon.html
+      license: CC0
+      fetch: manual
+      format: glTF+FBX
+
+  materials:             # PBR textures to dress the greybox (auto-fetch)
+    - name: ambientcg_concrete
+      source: ambientCG
+      id: Concrete034
+      res: 1K
+      fmt: JPG
+      license: CC0
+      fetch: api
+    - name: ambientcg_metal
+      source: ambientCG
+      id: Metal032
+      res: 1K
+      fmt: JPG
+      license: CC0
+      fetch: api
+    - name: ambientcg_tiles
+      source: ambientCG
+      id: Tiles074
+      res: 1K
+      fmt: JPG
+      license: CC0
+      fetch: api
+
+  sky_lighting:          # HDRIs for skybox + image-based lighting (auto-fetch via Poly Haven API)
+    - name: polyhaven_industrial_sky
+      source: PolyHaven
+      id: industrial_sunset_puresky
+      type: hdris
+      res: 2k
+      license: CC0
+      fetch: api
+
+  props:                 # dressing (auto-fetch models via Poly Haven API)
+    - name: polyhaven_barrel
+      source: PolyHaven
+      id: ammo_box
+      type: models
+      license: CC0
+      fetch: api
+
+  audio:                 # weapon fire, impacts, footsteps, UI
+    - name: kenney_audio
+      source: Kenney
+      url: https://kenney.nl/assets?q=audio
+      license: CC0
+      fetch: manual
+      provides: [weapon_fire, impact, footsteps, ui]
+
+# What GameForge GENERATES on top of this spine (not from the library):
+generated:
+  - textures:  restyle/recolor library materials, or unique surfaces (SDXL-Turbo)
+  - music:     level BGM (MusicGen)
+  - voice:     enemy/announcer lines (Piper)
+  - layout:    procedural level arrangement of the modular kit (Blender / GeometryScript)
+  - gameplay:  the FPS behavior recipes (agent-wired Blueprint graphs)
