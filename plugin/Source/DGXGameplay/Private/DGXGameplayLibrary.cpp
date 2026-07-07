@@ -52,3 +52,17 @@ AActor* UDGXGameplayLibrary::FireHitscan(AActor* Shooter, float Range, float Dam
 	}
 	return nullptr;
 }
+
+void UDGXGameplayLibrary::ChasePlayer(AActor* Enemy, float Speed)
+{
+	if (!Enemy) { return; }
+	UWorld* World = Enemy->GetWorld();
+	if (!World) { return; }
+	APawn* Player = UGameplayStatics::GetPlayerPawn(Enemy, 0);
+	if (!Player) { return; }
+
+	FVector Dir = Player->GetActorLocation() - Enemy->GetActorLocation();
+	Dir.Z = 0.f;                         // horizontal chase only
+	Dir = Dir.GetSafeNormal();
+	Enemy->AddActorWorldOffset(Dir * Speed * World->GetDeltaSeconds(), /*bSweep=*/true);
+}

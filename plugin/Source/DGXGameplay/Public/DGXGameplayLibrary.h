@@ -25,4 +25,9 @@ public:
 	 *  apply Damage to whatever is hit. Returns the hit actor (or null). */
 	UFUNCTION(BlueprintCallable, Category = "DGX|FPS")
 	static AActor* FireHitscan(AActor* Shooter, float Range = 10000.f, float Damage = 20.f);
+
+	/** Simple melee-chase AI: step Self toward player 0 by Speed (cm/s), collision-swept, using the
+	 *  world delta time — no AI controller required. Wire to the enemy's Tick. */
+	UFUNCTION(BlueprintCallable, Category = "DGX|FPS")
+	static void ChasePlayer(AActor* Enemy, float Speed = 300.f);
 };

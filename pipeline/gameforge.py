@@ -119,8 +119,12 @@ def _recipe_shoot(p):
     bp_connect(p, ax, "then", fire, "execute")
 
 def _recipe_enemy(p):
-    # simple patrol: Tick -> move forward. Chase-the-player is a refinement (GetPlayerPawn -> direction).
-    _recipe_auto_move(p)
+    # chase AI: Tick -> DGXGameplay.ChasePlayer(self) (steps toward player 0, collision-swept, no AIController)
+    ev    = bp_event(p, "ReceiveTick", -400, 0)
+    me    = bp_self(p, -240, 40)
+    chase = bp_call(p, GP, "ChasePlayer", 0, 0)
+    bp_connect(p, me, "self", chase, "Enemy")
+    bp_connect(p, ev, "then", chase, "execute")
 
 RECIPES = {
     "hello":     _recipe_hello,
