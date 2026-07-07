@@ -72,6 +72,11 @@ public:
 	static FString AddVariableNode(const FString& BlueprintPath, const FString& GraphName,
 		const FString& VarName, bool bIsSetter, float NodePosX, float NodePosY);
 
+	/** Add a "self" reference node (output pin "self"), to feed the Blueprint's own actor into a
+	 *  library function's object parameter (e.g. DGXGameplayLibrary.FireHitscan's Shooter). */
+	UFUNCTION(BlueprintCallable, Category = "DGX|Blueprint")
+	static FString AddSelfNode(const FString& BlueprintPath, const FString& GraphName, float NodePosX, float NodePosY);
+
 	/** Connect two node pins. Pin names: exec-out is usually "then", exec-in is "execute"; data pins
 	 *  use their parameter name. GraphName "" = event graph. Returns true on success. */
 	UFUNCTION(BlueprintCallable, Category = "DGX|Blueprint")

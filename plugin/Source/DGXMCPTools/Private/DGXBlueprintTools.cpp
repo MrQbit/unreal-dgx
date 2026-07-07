@@ -24,6 +24,7 @@
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
 #include "K2Node_InputAxisEvent.h"
+#include "K2Node_Self.h"
 #include "Engine/MemberReference.h"
 #include "AssetImportTask.h"
 #include "AssetToolsModule.h"
@@ -281,6 +282,20 @@ bool UDGXBlueprintTools::SetPinDefault(const FString& BlueprintPath, const FStri
 	Schema->TrySetDefaultValue(*Pin, Value);
 	FBlueprintEditorUtils::MarkBlueprintAsModified(BP);
 	return true;
+}
+
+FString UDGXBlueprintTools::AddSelfNode(const FString& BlueprintPath, const FString& GraphName, float NodePosX, float NodePosY)
+{
+	UBlueprint* BP = DGX_LoadBlueprint(BlueprintPath);
+	UEdGraph* Graph = DGX_GetGraph(BP, GraphName);
+	if (!BP || !Graph) { return FString(); }
+
+	FGraphNodeCreator<UK2Node_Self> Creator(*Graph);
+	UK2Node_Self* Node = Creator.CreateNode();
+	Node->NodePosX = (int32)NodePosX;
+	Node->NodePosY = (int32)NodePosY;
+	Creator.Finalize();
+	return Node->NodeGuid.ToString();
 }
 
 FString UDGXBlueprintTools::AddVariableNode(const FString& BlueprintPath, const FString& GraphName,

@@ -46,6 +46,9 @@ def bp_input_axis(p, axis, x, y):    return rc_call("AddInputAxisEvent", {"Bluep
 def bp_call(p, cls, fn, x, y):       return rc_call("AddCallFunctionNode", {"BlueprintPath": p, "GraphName": "", "TargetClassPath": cls, "FunctionName": fn, "NodePosX": x, "NodePosY": y})
 def bp_connect(p, a, pa, b, pb):     return rc_call("ConnectNodes", {"BlueprintPath": p, "GraphName": "", "NodeAGuid": a, "PinAName": pa, "NodeBGuid": b, "PinBName": pb})
 def bp_pin(p, node, pin, val):       return rc_call("SetPinDefault", {"BlueprintPath": p, "GraphName": "", "NodeGuid": node, "PinName": pin, "Value": val})
+def bp_self(p, x=-240, y=100):       return rc_call("AddSelfNode", {"BlueprintPath": p, "GraphName": "", "NodePosX": x, "NodePosY": y})
+
+GP = "/Script/DGXGameplay.DGXGameplayLibrary"   # runtime FPS helpers (ship in the packaged game)
 
 ACTOR = "/Script/Engine.Actor"
 KSL   = "/Script/Engine.KismetSystemLibrary"
@@ -83,7 +86,7 @@ CHAR = "/Script/Engine.Character"
 
 # ---- FPS recipes (entity parent should be /Script/Engine.Character; auto-possess Player 0) ----
 def _recipe_fps_controller(p):
-    """First-person controller: camera + mouse look (Turn/LookUp) + WASD move (MoveForward/MoveRight)."""
+    """First-person controller: camera + mouse look (Turn/LookUp) + camera-relative WASD move."""
     bp_component(p, "/Script/Engine.CameraComponent", "FPCamera")
     # look: axis "Axis Value" (float) -> controller yaw/pitch (float) — clean wire
     for axis, fn in (("Turn", "AddControllerYawInput"), ("LookUp", "AddControllerPitchInput")):
@@ -91,11 +94,14 @@ def _recipe_fps_controller(p):
         n  = bp_call(p, PAWN, fn, -60, 0)
         bp_connect(p, ax, "then", n, "execute")
         bp_connect(p, ax, "Axis Value", n, "Val")
-    # move: axis value -> AddMovementInput.ScaleValue (world-axis; camera-relative is a refinement)
-    for axis, direction in (("MoveForward", "(X=1.0,Y=0.0,Z=0.0)"), ("MoveRight", "(X=0.0,Y=1.0,Z=0.0)")):
-        ax = bp_input_axis(p, axis, -420, 0)
-        mv = bp_call(p, PAWN, "AddMovementInput", -60, 0)
-        bp_pin(p, mv, "WorldDirection", direction)
+    # move: camera-relative direction from the DGXGameplay helper (yaw-only forward/right), scaled by axis
+    for axis, dirfn in (("MoveForward", "GetCameraForward"), ("MoveRight", "GetCameraRight")):
+        ax   = bp_input_axis(p, axis, -420, 0)
+        me   = bp_self(p, -260, 40)
+        dirn = bp_call(p, GP, dirfn, -180, 0)          # static: GetCameraForward(Pawn) -> FVector (pure)
+        bp_connect(p, me, "self", dirn, "Pawn")
+        mv   = bp_call(p, PAWN, "AddMovementInput", -60, 0)
+        bp_connect(p, dirn, "ReturnValue", mv, "WorldDirection")
         bp_connect(p, ax, "then", mv, "execute")
         bp_connect(p, ax, "Axis Value", mv, "ScaleValue")
 
@@ -105,12 +111,12 @@ def _recipe_jump(p):
     bp_connect(p, ax, "then", jump, "execute")
 
 def _recipe_shoot(p):
-    # Fire input -> hitscan. A full LineTraceByChannel graph is many fragile nodes; ship a clear hook
-    # (PrintString) that the agent replaces with a trace+damage graph per game. TODO: line trace.
-    ax = bp_input_axis(p, "Fire", -400, 400)
-    ps = bp_call(p, KSL, "PrintString", 0, 400)
-    bp_pin(p, ps, "InString", "Fire")
-    bp_connect(p, ax, "then", ps, "execute")
+    # Fire input -> hitscan via the DGXGameplay runtime helper (line-trace + ApplyDamage, in tested C++).
+    ax   = bp_input_axis(p, "Fire", -400, 400)
+    me   = bp_self(p, -200, 440)
+    fire = bp_call(p, GP, "FireHitscan", 0, 400)       # FireHitscan(Shooter, Range=10000, Damage=20)
+    bp_connect(p, me, "self", fire, "Shooter")
+    bp_connect(p, ax, "then", fire, "execute")
 
 def _recipe_enemy(p):
     # simple patrol: Tick -> move forward. Chase-the-player is a refinement (GetPlayerPawn -> direction).

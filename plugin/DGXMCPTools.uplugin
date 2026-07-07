@@ -15,6 +15,11 @@
 			"Name": "DGXMCPTools",
 			"Type": "Editor",
 			"LoadingPhase": "Default"
+		},
+		{
+			"Name": "DGXGameplay",
+			"Type": "Runtime",
+			"LoadingPhase": "Default"
 		}
 	]
 }

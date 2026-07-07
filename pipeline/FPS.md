@@ -49,13 +49,14 @@ Spec `behaviors: [...]` compile into Blueprint graphs (`gameforge.py`). Entity p
 
 | behavior | graph |
 |---|---|
-| `fps_controller` | CameraComponent + mouse look (Turn/LookUp → controller yaw/pitch) + WASD move (MoveForward/MoveRight → AddMovementInput) |
+| `fps_controller` | CameraComponent + mouse look (Turn/LookUp → yaw/pitch) + **camera-relative** WASD move (`DGXGameplayLibrary.GetCameraForward/Right` → AddMovementInput) |
 | `jump` | Jump input → `ACharacter::Jump` |
-| `shoot` | Fire input → hook (PrintString) — replace with a LineTrace+damage graph per game |
+| `shoot` | Fire input → `DGXGameplayLibrary.FireHitscan` (line-trace + ApplyDamage, in runtime C++) |
 | `enemy` | Tick → patrol move (chase-the-player is a refinement) |
 
-These compile; the `shoot` hitscan and camera-relative movement are the two refinements to flesh out
-per game (the agent does this against the live editor). Movement/look/jump are the working core.
+The hard logic (hitscan trace + damage, yaw-only camera-relative vectors) lives in a **runtime** C++
+module (`DGXGameplay`, ships in the packaged game); the recipes just wire input → helper, so they're
+robust rather than fragile hand-built graphs. `enemy` chase-the-player is the remaining refinement.
 
 ## Build one
 
